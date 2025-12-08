@@ -131,6 +131,8 @@ Client-side, per-agent rate limits prevent abuse and ensure fair resource usage 
 | Tool                           | Description                                                              |
 | ------------------------------ | ------------------------------------------------------------------------ |
 | `swarm_init`                   | Check tool availability, report degraded features                        |
+| `swarm_select_strategy`        | Analyze task and recommend decomposition strategy                        |
+| `swarm_plan_prompt`            | Generate strategy-specific planning prompt with CASS integration         |
 | `swarm_decompose`              | Generate decomposition prompt, optionally queries CASS for similar tasks |
 | `swarm_validate_decomposition` | Validate decomposition response, detect instruction conflicts            |
 | `swarm_status`                 | Get swarm status by epic ID                                              |
@@ -151,6 +153,80 @@ Client-side, per-agent rate limits prevent abuse and ensure fair resource usage 
 | `structured_parse_evaluation`    | Parse and validate evaluation response                   |
 | `structured_parse_decomposition` | Parse and validate task decomposition                    |
 | `structured_parse_bead_tree`     | Parse and validate bead tree for epic creation           |
+
+## Decomposition Strategies
+
+The plugin supports three decomposition strategies, auto-selected based on task keywords:
+
+### File-Based Strategy
+
+Best for: Refactoring, migrations, pattern changes across codebase
+
+**Keywords**: refactor, migrate, rename, update all, convert, upgrade
+
+**Guidelines**:
+
+- Group files by directory or type
+- Handle shared types/utilities first
+- Minimize cross-directory dependencies
+
+### Feature-Based Strategy
+
+Best for: New features, adding functionality
+
+**Keywords**: add, implement, build, create, feature, new
+
+**Guidelines**:
+
+- Each subtask is a complete vertical slice
+- Start with data layer, then logic, then UI
+- Keep related components together
+
+### Risk-Based Strategy
+
+Best for: Bug fixes, security issues, critical changes
+
+**Keywords**: fix, bug, security, critical, urgent, hotfix
+
+**Guidelines**:
+
+- Write tests FIRST
+- Isolate risky changes
+- Audit similar code for same issue
+
+### Strategy Selection
+
+Use `swarm_select_strategy` to see the recommended strategy:
+
+```typescript
+swarm_select_strategy({ task: "Add user authentication" });
+// Returns: { strategy: "feature-based", confidence: 0.85, reasoning: "..." }
+```
+
+Or let `swarm_plan_prompt` auto-select:
+
+```typescript
+swarm_plan_prompt({ task: "Refactor all components to use hooks" });
+// Auto-selects file-based strategy
+```
+
+## Example Planner Agent
+
+The plugin includes an example planner agent at `examples/agents/swarm-planner.md`.
+
+Copy to your OpenCode agents directory:
+
+```bash
+cp examples/agents/swarm-planner.md ~/.config/opencode/agents/
+```
+
+Then invoke with:
+
+```
+@swarm-planner "Add user authentication with OAuth"
+```
+
+The planner uses `swarm_select_strategy` and `swarm_plan_prompt` internally to create optimal decompositions.
 
 ### Schemas (for structured outputs)
 

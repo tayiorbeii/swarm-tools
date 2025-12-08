@@ -16,6 +16,8 @@ import {
   swarm_complete,
   swarm_subtask_prompt,
   swarm_evaluation_prompt,
+  swarm_select_strategy,
+  swarm_plan_prompt,
   formatSubtaskPromptV2,
   SUBTASK_PROMPT_V2,
 } from "./swarm";
@@ -116,6 +118,288 @@ describe("swarm_decompose", () => {
 
     // Default is 5
     expect(parsed.prompt).toContain("2-5 independent subtasks");
+  });
+});
+
+// ============================================================================
+// Strategy Selection Tests
+// ============================================================================
+
+describe("swarm_select_strategy", () => {
+  it("selects feature-based for 'add' tasks", async () => {
+    const result = await swarm_select_strategy.execute(
+      {
+        task: "Add user authentication with OAuth",
+      },
+      mockContext,
+    );
+    const parsed = JSON.parse(result);
+
+    expect(parsed.strategy).toBe("feature-based");
+    expect(parsed.confidence).toBeGreaterThan(0.5);
+    expect(parsed.reasoning).toContain("add");
+    expect(parsed.guidelines).toBeInstanceOf(Array);
+    expect(parsed.anti_patterns).toBeInstanceOf(Array);
+  });
+
+  it("selects file-based for 'refactor' tasks", async () => {
+    const result = await swarm_select_strategy.execute(
+      {
+        task: "Refactor all components to use new API",
+      },
+      mockContext,
+    );
+    const parsed = JSON.parse(result);
+
+    expect(parsed.strategy).toBe("file-based");
+    expect(parsed.confidence).toBeGreaterThanOrEqual(0.5);
+    expect(parsed.reasoning).toContain("refactor");
+  });
+
+  it("selects risk-based for 'fix security' tasks", async () => {
+    const result = await swarm_select_strategy.execute(
+      {
+        task: "Fix security vulnerability in authentication",
+      },
+      mockContext,
+    );
+    const parsed = JSON.parse(result);
+
+    expect(parsed.strategy).toBe("risk-based");
+    expect(parsed.confidence).toBeGreaterThan(0.5);
+    // Should match either 'fix' or 'security'
+    expect(
+      parsed.reasoning.includes("fix") || parsed.reasoning.includes("security"),
+    ).toBe(true);
+  });
+
+  it("defaults to feature-based when no keywords match", async () => {
+    const result = await swarm_select_strategy.execute(
+      {
+        task: "Something completely unrelated without keywords",
+      },
+      mockContext,
+    );
+    const parsed = JSON.parse(result);
+
+    expect(parsed.strategy).toBe("feature-based");
+    // Confidence should be lower without keyword matches
+    expect(parsed.confidence).toBeLessThanOrEqual(0.6);
+    expect(parsed.reasoning).toContain("Defaulting to feature-based");
+  });
+
+  it("includes confidence score and reasoning", async () => {
+    const result = await swarm_select_strategy.execute(
+      {
+        task: "Implement new dashboard feature",
+      },
+      mockContext,
+    );
+    const parsed = JSON.parse(result);
+
+    expect(parsed).toHaveProperty("strategy");
+    expect(parsed).toHaveProperty("confidence");
+    expect(parsed).toHaveProperty("reasoning");
+    expect(parsed).toHaveProperty("description");
+    expect(typeof parsed.confidence).toBe("number");
+    expect(parsed.confidence).toBeGreaterThanOrEqual(0);
+    expect(parsed.confidence).toBeLessThanOrEqual(1);
+    expect(typeof parsed.reasoning).toBe("string");
+    expect(parsed.reasoning.length).toBeGreaterThan(0);
+  });
+
+  it("includes alternative strategies with scores", async () => {
+    const result = await swarm_select_strategy.execute(
+      {
+        task: "Build new payment processing module",
+      },
+      mockContext,
+    );
+    const parsed = JSON.parse(result);
+
+    expect(parsed).toHaveProperty("alternatives");
+    expect(parsed.alternatives).toBeInstanceOf(Array);
+    expect(parsed.alternatives.length).toBe(2); // 3 strategies - 1 selected = 2 alternatives
+
+    for (const alt of parsed.alternatives) {
+      expect(alt).toHaveProperty("strategy");
+      expect(alt).toHaveProperty("description");
+      expect(alt).toHaveProperty("score");
+      expect(["file-based", "feature-based", "risk-based"]).toContain(
+        alt.strategy,
+      );
+      expect(typeof alt.score).toBe("number");
+    }
+  });
+
+  it("includes codebase context in reasoning when provided", async () => {
+    const result = await swarm_select_strategy.execute(
+      {
+        task: "Add new API endpoint",
+        codebase_context: "Using Express.js with TypeScript and PostgreSQL",
+      },
+      mockContext,
+    );
+    const parsed = JSON.parse(result);
+
+    expect(parsed.reasoning).toContain("Express.js");
+  });
+});
+
+// ============================================================================
+// Planning Prompt Tests
+// ============================================================================
+
+describe("swarm_plan_prompt", () => {
+  it("auto-selects strategy when not specified", async () => {
+    const result = await swarm_plan_prompt.execute(
+      {
+        task: "Add user settings page",
+        max_subtasks: 3,
+        query_cass: false, // Disable CASS to isolate test
+      },
+      mockContext,
+    );
+    const parsed = JSON.parse(result);
+
+    expect(parsed).toHaveProperty("prompt");
+    expect(parsed).toHaveProperty("strategy");
+    expect(parsed.strategy).toHaveProperty("selected");
+    expect(parsed.strategy).toHaveProperty("reasoning");
+    expect(parsed.strategy.selected).toBe("feature-based"); // 'add' keyword
+  });
+
+  it("uses explicit strategy when provided", async () => {
+    const result = await swarm_plan_prompt.execute(
+      {
+        task: "Do something",
+        strategy: "risk-based",
+        max_subtasks: 3,
+        query_cass: false,
+      },
+      mockContext,
+    );
+    const parsed = JSON.parse(result);
+
+    expect(parsed.strategy.selected).toBe("risk-based");
+    expect(parsed.strategy.reasoning).toContain("User-specified strategy");
+  });
+
+  it("includes strategy guidelines in prompt", async () => {
+    const result = await swarm_plan_prompt.execute(
+      {
+        task: "Refactor the codebase",
+        max_subtasks: 4,
+        query_cass: false,
+      },
+      mockContext,
+    );
+    const parsed = JSON.parse(result);
+
+    // Prompt should contain strategy-specific guidelines
+    expect(parsed.prompt).toContain("## Strategy:");
+    expect(parsed.prompt).toContain("### Guidelines");
+    expect(parsed.prompt).toContain("### Anti-Patterns");
+    expect(parsed.prompt).toContain("### Examples");
+  });
+
+  it("includes anti-patterns in output", async () => {
+    const result = await swarm_plan_prompt.execute(
+      {
+        task: "Build new feature",
+        max_subtasks: 3,
+        query_cass: false,
+      },
+      mockContext,
+    );
+    const parsed = JSON.parse(result);
+
+    expect(parsed.strategy).toHaveProperty("anti_patterns");
+    expect(parsed.strategy.anti_patterns).toBeInstanceOf(Array);
+    expect(parsed.strategy.anti_patterns.length).toBeGreaterThan(0);
+  });
+
+  it("returns expected_schema and validation_note", async () => {
+    const result = await swarm_plan_prompt.execute(
+      {
+        task: "Some task",
+        max_subtasks: 5,
+        query_cass: false,
+      },
+      mockContext,
+    );
+    const parsed = JSON.parse(result);
+
+    expect(parsed).toHaveProperty("expected_schema", "BeadTree");
+    expect(parsed).toHaveProperty("validation_note");
+    expect(parsed.validation_note).toContain("swarm_validate_decomposition");
+    expect(parsed).toHaveProperty("schema_hint");
+    expect(parsed.schema_hint).toHaveProperty("epic");
+    expect(parsed.schema_hint).toHaveProperty("subtasks");
+  });
+
+  it("reports CASS status in output (queried flag)", async () => {
+    // Test with CASS disabled
+    const resultDisabled = await swarm_plan_prompt.execute(
+      {
+        task: "Add feature",
+        max_subtasks: 3,
+        query_cass: false,
+      },
+      mockContext,
+    );
+    const parsedDisabled = JSON.parse(resultDisabled);
+
+    expect(parsedDisabled).toHaveProperty("cass_history");
+    expect(parsedDisabled.cass_history.queried).toBe(false);
+
+    // Test with CASS enabled (may or may not be available)
+    const resultEnabled = await swarm_plan_prompt.execute(
+      {
+        task: "Add feature",
+        max_subtasks: 3,
+        query_cass: true,
+      },
+      mockContext,
+    );
+    const parsedEnabled = JSON.parse(resultEnabled);
+
+    expect(parsedEnabled).toHaveProperty("cass_history");
+    expect(parsedEnabled.cass_history).toHaveProperty("queried");
+    // If CASS is unavailable, queried will be false with reason
+    if (!parsedEnabled.cass_history.queried) {
+      expect(parsedEnabled.cass_history).toHaveProperty("reason");
+    }
+  });
+
+  it("includes context in prompt when provided", async () => {
+    const result = await swarm_plan_prompt.execute(
+      {
+        task: "Add user profile",
+        max_subtasks: 3,
+        context: "We use Next.js App Router with server components",
+        query_cass: false,
+      },
+      mockContext,
+    );
+    const parsed = JSON.parse(result);
+
+    expect(parsed.prompt).toContain("Next.js App Router");
+    expect(parsed.prompt).toContain("server components");
+  });
+
+  it("includes max_subtasks in prompt", async () => {
+    const result = await swarm_plan_prompt.execute(
+      {
+        task: "Build something",
+        max_subtasks: 7,
+        query_cass: false,
+      },
+      mockContext,
+    );
+    const parsed = JSON.parse(result);
+
+    expect(parsed.prompt).toContain("2-7 independent subtasks");
   });
 });
 

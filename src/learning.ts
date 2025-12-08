@@ -65,6 +65,16 @@ export const CriterionWeightSchema = z.object({
 export type CriterionWeight = z.infer<typeof CriterionWeightSchema>;
 
 /**
+ * Decomposition strategies for tracking which approach was used
+ */
+export const DecompositionStrategySchema = z.enum([
+  "file-based",
+  "feature-based",
+  "risk-based",
+]);
+export type DecompositionStrategy = z.infer<typeof DecompositionStrategySchema>;
+
+/**
  * Outcome signals from a completed subtask
  *
  * These implicit signals help score decomposition quality without
@@ -85,6 +95,8 @@ export const OutcomeSignalsSchema = z.object({
   files_touched: z.array(z.string()).default([]),
   /** Timestamp when outcome was recorded */
   timestamp: z.string(), // ISO-8601
+  /** Decomposition strategy used for this task */
+  strategy: DecompositionStrategySchema.optional(),
 });
 export type OutcomeSignals = z.infer<typeof OutcomeSignalsSchema>;
 
@@ -435,4 +447,5 @@ export const learningSchemas = {
   CriterionWeightSchema,
   OutcomeSignalsSchema,
   ScoredOutcomeSchema,
+  DecompositionStrategySchema,
 };

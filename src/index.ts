@@ -254,6 +254,12 @@ export {
  * - swarmTools - Swarm orchestration tools
  * - SwarmError, DecompositionError - Error classes
  * - formatSubtaskPrompt, formatEvaluationPrompt - Prompt helpers
+ * - selectStrategy, formatStrategyGuidelines - Strategy selection helpers
+ * - STRATEGIES - Strategy definitions
+ *
+ * Types:
+ * - DecompositionStrategy - Strategy type union
+ * - StrategyDefinition - Strategy definition interface
  *
  * NOTE: Prompt template strings (DECOMPOSITION_PROMPT, etc.) are NOT exported
  * to avoid confusing the plugin loader which tries to call all exports as functions
@@ -266,6 +272,12 @@ export {
   formatSubtaskPromptV2,
   formatEvaluationPrompt,
   SUBTASK_PROMPT_V2,
+  // Strategy exports
+  STRATEGIES,
+  selectStrategy,
+  formatStrategyGuidelines,
+  type DecompositionStrategy,
+  type StrategyDefinition,
 } from "./swarm";
 
 /**

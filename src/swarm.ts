@@ -28,11 +28,13 @@ import {
 import { mcpCall } from "./agent-mail";
 import {
   OutcomeSignalsSchema,
+  DecompositionStrategySchema,
   scoreImplicitFeedback,
   outcomeToFeedback,
   type OutcomeSignals,
   type ScoredOutcome,
   type FeedbackEvent,
+  type DecompositionStrategy as LearningDecompositionStrategy,
   DEFAULT_LEARNING_CONFIG,
 } from "./learning";
 import {
@@ -191,6 +193,244 @@ export function detectInstructionConflicts(
   }
 
   return conflicts;
+}
+
+// ============================================================================
+// Strategy Definitions
+// ============================================================================
+
+/**
+ * Decomposition strategy types
+ */
+export type DecompositionStrategy =
+  | "file-based"
+  | "feature-based"
+  | "risk-based"
+  | "auto";
+
+/**
+ * Strategy definition with keywords, guidelines, and anti-patterns
+ */
+export interface StrategyDefinition {
+  name: DecompositionStrategy;
+  description: string;
+  keywords: string[];
+  guidelines: string[];
+  antiPatterns: string[];
+  examples: string[];
+}
+
+/**
+ * Strategy definitions for task decomposition
+ */
+export const STRATEGIES: Record<
+  Exclude<DecompositionStrategy, "auto">,
+  StrategyDefinition
+> = {
+  "file-based": {
+    name: "file-based",
+    description:
+      "Group by file type or directory. Best for refactoring, migrations, and pattern changes across codebase.",
+    keywords: [
+      "refactor",
+      "migrate",
+      "update all",
+      "rename",
+      "replace",
+      "convert",
+      "upgrade",
+      "deprecate",
+      "remove",
+      "cleanup",
+      "lint",
+      "format",
+    ],
+    guidelines: [
+      "Group files by directory or type (e.g., all components, all tests)",
+      "Minimize cross-directory dependencies within a subtask",
+      "Handle shared types/utilities first if they change",
+      "Each subtask should be a complete transformation of its file set",
+      "Consider import/export relationships when grouping",
+    ],
+    antiPatterns: [
+      "Don't split tightly coupled files across subtasks",
+      "Don't group files that have no relationship",
+      "Don't forget to update imports when moving/renaming",
+    ],
+    examples: [
+      "Migrate all components to new API → split by component directory",
+      "Rename userId to accountId → split by module (types first, then consumers)",
+      "Update all tests to use new matcher → split by test directory",
+    ],
+  },
+  "feature-based": {
+    name: "feature-based",
+    description:
+      "Vertical slices with UI + API + data. Best for new features and adding functionality.",
+    keywords: [
+      "add",
+      "implement",
+      "build",
+      "create",
+      "feature",
+      "new",
+      "integrate",
+      "connect",
+      "enable",
+      "support",
+    ],
+    guidelines: [
+      "Each subtask is a complete vertical slice (UI + logic + data)",
+      "Start with data layer/types, then logic, then UI",
+      "Keep related components together (form + validation + submission)",
+      "Separate concerns that can be developed independently",
+      "Consider user-facing features as natural boundaries",
+    ],
+    antiPatterns: [
+      "Don't split a single feature across multiple subtasks",
+      "Don't create subtasks that can't be tested independently",
+      "Don't forget integration points between features",
+    ],
+    examples: [
+      "Add user auth → [OAuth setup, Session management, Protected routes]",
+      "Build dashboard → [Data fetching, Chart components, Layout/navigation]",
+      "Add search → [Search API, Search UI, Results display]",
+    ],
+  },
+  "risk-based": {
+    name: "risk-based",
+    description:
+      "Isolate high-risk changes, add tests first. Best for bug fixes, security issues, and critical changes.",
+    keywords: [
+      "fix",
+      "bug",
+      "security",
+      "vulnerability",
+      "critical",
+      "urgent",
+      "hotfix",
+      "patch",
+      "audit",
+      "review",
+      "investigate",
+    ],
+    guidelines: [
+      "Write tests FIRST to capture expected behavior",
+      "Isolate the risky change to minimize blast radius",
+      "Add monitoring/logging around the change",
+      "Create rollback plan as part of the task",
+      "Audit similar code for the same issue",
+    ],
+    antiPatterns: [
+      "Don't make multiple risky changes in one subtask",
+      "Don't skip tests for 'simple' fixes",
+      "Don't forget to check for similar issues elsewhere",
+    ],
+    examples: [
+      "Fix auth bypass → [Add regression test, Fix vulnerability, Audit similar endpoints]",
+      "Fix race condition → [Add test reproducing issue, Implement fix, Add concurrency tests]",
+      "Security audit → [Scan for vulnerabilities, Fix critical issues, Document remaining risks]",
+    ],
+  },
+};
+
+/**
+ * Analyze task description and select best decomposition strategy
+ *
+ * @param task - Task description
+ * @returns Selected strategy with reasoning
+ */
+export function selectStrategy(task: string): {
+  strategy: Exclude<DecompositionStrategy, "auto">;
+  confidence: number;
+  reasoning: string;
+  alternatives: Array<{
+    strategy: Exclude<DecompositionStrategy, "auto">;
+    score: number;
+  }>;
+} {
+  const taskLower = task.toLowerCase();
+
+  // Score each strategy based on keyword matches
+  const scores: Record<Exclude<DecompositionStrategy, "auto">, number> = {
+    "file-based": 0,
+    "feature-based": 0,
+    "risk-based": 0,
+  };
+
+  for (const [strategyName, definition] of Object.entries(STRATEGIES)) {
+    const name = strategyName as Exclude<DecompositionStrategy, "auto">;
+    for (const keyword of definition.keywords) {
+      if (taskLower.includes(keyword)) {
+        scores[name] += 1;
+      }
+    }
+  }
+
+  // Find the winner
+  const entries = Object.entries(scores) as Array<
+    [Exclude<DecompositionStrategy, "auto">, number]
+  >;
+  entries.sort((a, b) => b[1] - a[1]);
+
+  const [winner, winnerScore] = entries[0];
+  const [runnerUp, runnerUpScore] = entries[1] || [null, 0];
+
+  // Calculate confidence based on margin
+  const totalScore = entries.reduce((sum, [, score]) => sum + score, 0);
+  const confidence =
+    totalScore > 0
+      ? Math.min(0.95, 0.5 + (winnerScore - runnerUpScore) / totalScore)
+      : 0.5; // Default to 50% if no keywords matched
+
+  // Build reasoning
+  let reasoning: string;
+  if (winnerScore === 0) {
+    reasoning = `No strong keyword signals. Defaulting to feature-based as it's most versatile.`;
+  } else {
+    const matchedKeywords = STRATEGIES[winner].keywords.filter((k) =>
+      taskLower.includes(k),
+    );
+    reasoning = `Matched keywords: ${matchedKeywords.join(", ")}. ${STRATEGIES[winner].description}`;
+  }
+
+  // If no keywords matched, default to feature-based
+  const finalStrategy = winnerScore === 0 ? "feature-based" : winner;
+
+  return {
+    strategy: finalStrategy,
+    confidence,
+    reasoning,
+    alternatives: entries
+      .filter(([s]) => s !== finalStrategy)
+      .map(([strategy, score]) => ({ strategy, score })),
+  };
+}
+
+/**
+ * Format strategy-specific guidelines for the decomposition prompt
+ */
+export function formatStrategyGuidelines(
+  strategy: Exclude<DecompositionStrategy, "auto">,
+): string {
+  const def = STRATEGIES[strategy];
+
+  const guidelines = def.guidelines.map((g) => `- ${g}`).join("\n");
+  const antiPatterns = def.antiPatterns.map((a) => `- ${a}`).join("\n");
+  const examples = def.examples.map((e) => `- ${e}`).join("\n");
+
+  return `## Strategy: ${strategy}
+
+${def.description}
+
+### Guidelines
+${guidelines}
+
+### Anti-Patterns (Avoid These)
+${antiPatterns}
+
+### Examples
+${examples}`;
 }
 
 // ============================================================================
@@ -743,6 +983,227 @@ function formatCassHistoryForPrompt(history: CassSearchResult): string {
 // ============================================================================
 // Tool Definitions
 // ============================================================================
+
+/**
+ * Select the best decomposition strategy for a task
+ *
+ * Analyzes task description and recommends a strategy with reasoning.
+ * Use this before swarm_plan_prompt to understand the recommended approach.
+ */
+export const swarm_select_strategy = tool({
+  description:
+    "Analyze task and recommend decomposition strategy (file-based, feature-based, or risk-based)",
+  args: {
+    task: tool.schema.string().min(1).describe("Task description to analyze"),
+    codebase_context: tool.schema
+      .string()
+      .optional()
+      .describe("Optional codebase context (file structure, tech stack, etc.)"),
+  },
+  async execute(args) {
+    const result = selectStrategy(args.task);
+
+    // Enhance reasoning with codebase context if provided
+    let enhancedReasoning = result.reasoning;
+    if (args.codebase_context) {
+      enhancedReasoning += `\n\nCodebase context considered: ${args.codebase_context.slice(0, 200)}...`;
+    }
+
+    return JSON.stringify(
+      {
+        strategy: result.strategy,
+        confidence: Math.round(result.confidence * 100) / 100,
+        reasoning: enhancedReasoning,
+        description: STRATEGIES[result.strategy].description,
+        guidelines: STRATEGIES[result.strategy].guidelines,
+        anti_patterns: STRATEGIES[result.strategy].antiPatterns,
+        alternatives: result.alternatives.map((alt) => ({
+          strategy: alt.strategy,
+          description: STRATEGIES[alt.strategy].description,
+          score: alt.score,
+        })),
+      },
+      null,
+      2,
+    );
+  },
+});
+
+/**
+ * Strategy-specific decomposition prompt template
+ */
+const STRATEGY_DECOMPOSITION_PROMPT = `You are decomposing a task into parallelizable subtasks for a swarm of agents.
+
+## Task
+{task}
+
+{strategy_guidelines}
+
+{context_section}
+
+{cass_history}
+
+## MANDATORY: Beads Issue Tracking
+
+**Every subtask MUST become a bead.** This is non-negotiable.
+
+After decomposition, the coordinator will:
+1. Create an epic bead for the overall task
+2. Create child beads for each subtask
+3. Track progress through bead status updates
+4. Close beads with summaries when complete
+
+Agents MUST update their bead status as they work. No silent progress.
+
+## Requirements
+
+1. **Break into 2-{max_subtasks} independent subtasks** that can run in parallel
+2. **Assign files** - each subtask must specify which files it will modify
+3. **No file overlap** - files cannot appear in multiple subtasks (they get exclusive locks)
+4. **Order by dependency** - if subtask B needs subtask A's output, A must come first in the array
+5. **Estimate complexity** - 1 (trivial) to 5 (complex)
+6. **Plan aggressively** - break down more than you think necessary, smaller is better
+
+## Response Format
+
+Respond with a JSON object matching this schema:
+
+\`\`\`typescript
+{
+  epic: {
+    title: string,        // Epic title for the beads tracker
+    description?: string  // Brief description of the overall goal
+  },
+  subtasks: [
+    {
+      title: string,              // What this subtask accomplishes
+      description?: string,       // Detailed instructions for the agent
+      files: string[],            // Files this subtask will modify (globs allowed)
+      dependencies: number[],     // Indices of subtasks this depends on (0-indexed)
+      estimated_complexity: 1-5   // Effort estimate
+    },
+    // ... more subtasks
+  ]
+}
+\`\`\`
+
+Now decompose the task:`;
+
+/**
+ * Generate a strategy-specific planning prompt
+ *
+ * Higher-level than swarm_decompose - includes strategy selection and guidelines.
+ * Use this when you want the full planning experience with strategy-specific advice.
+ */
+export const swarm_plan_prompt = tool({
+  description:
+    "Generate strategy-specific decomposition prompt. Auto-selects strategy or uses provided one. Queries CASS for similar tasks.",
+  args: {
+    task: tool.schema.string().min(1).describe("Task description to decompose"),
+    strategy: tool.schema
+      .enum(["file-based", "feature-based", "risk-based", "auto"])
+      .optional()
+      .describe("Decomposition strategy (default: auto-detect)"),
+    max_subtasks: tool.schema
+      .number()
+      .int()
+      .min(2)
+      .max(10)
+      .default(5)
+      .describe("Maximum number of subtasks (default: 5)"),
+    context: tool.schema
+      .string()
+      .optional()
+      .describe("Additional context (codebase info, constraints, etc.)"),
+    query_cass: tool.schema
+      .boolean()
+      .optional()
+      .describe("Query CASS for similar past tasks (default: true)"),
+    cass_limit: tool.schema
+      .number()
+      .int()
+      .min(1)
+      .max(10)
+      .optional()
+      .describe("Max CASS results to include (default: 3)"),
+  },
+  async execute(args) {
+    // Select strategy
+    let selectedStrategy: Exclude<DecompositionStrategy, "auto">;
+    let strategyReasoning: string;
+
+    if (args.strategy && args.strategy !== "auto") {
+      selectedStrategy = args.strategy;
+      strategyReasoning = `User-specified strategy: ${selectedStrategy}`;
+    } else {
+      const selection = selectStrategy(args.task);
+      selectedStrategy = selection.strategy;
+      strategyReasoning = selection.reasoning;
+    }
+
+    // Query CASS for similar past tasks
+    let cassContext = "";
+    let cassResult: CassSearchResult | null = null;
+
+    if (args.query_cass !== false) {
+      cassResult = await queryCassHistory(args.task, args.cass_limit ?? 3);
+      if (cassResult && cassResult.results.length > 0) {
+        cassContext = formatCassHistoryForPrompt(cassResult);
+      }
+    }
+
+    // Format strategy guidelines
+    const strategyGuidelines = formatStrategyGuidelines(selectedStrategy);
+
+    // Combine user context
+    const contextSection = args.context
+      ? `## Additional Context\n${args.context}`
+      : "## Additional Context\n(none provided)";
+
+    // Build the prompt
+    const prompt = STRATEGY_DECOMPOSITION_PROMPT.replace("{task}", args.task)
+      .replace("{strategy_guidelines}", strategyGuidelines)
+      .replace("{context_section}", contextSection)
+      .replace("{cass_history}", cassContext || "")
+      .replace("{max_subtasks}", (args.max_subtasks ?? 5).toString());
+
+    return JSON.stringify(
+      {
+        prompt,
+        strategy: {
+          selected: selectedStrategy,
+          reasoning: strategyReasoning,
+          guidelines: STRATEGIES[selectedStrategy].guidelines,
+          anti_patterns: STRATEGIES[selectedStrategy].antiPatterns,
+        },
+        expected_schema: "BeadTree",
+        schema_hint: {
+          epic: { title: "string", description: "string?" },
+          subtasks: [
+            {
+              title: "string",
+              description: "string?",
+              files: "string[]",
+              dependencies: "number[]",
+              estimated_complexity: "1-5",
+            },
+          ],
+        },
+        validation_note:
+          "Parse agent response as JSON and validate with swarm_validate_decomposition",
+        cass_history: cassResult
+          ? {
+              queried: true,
+              results_found: cassResult.results.length,
+              included_in_context: cassResult.results.length > 0,
+            }
+          : { queried: false, reason: "disabled or unavailable" },
+      },
+      null,
+      2,
+    );
+  },
+});
 
 /**
  * Decompose a task into a bead tree
@@ -1367,6 +1828,9 @@ export const swarm_complete = tool({
  * decomposition quality over time. This data feeds into criterion
  * weight calculations.
  *
+ * Strategy tracking enables learning about which decomposition strategies
+ * work best for different task types.
+ *
  * @see src/learning.ts for scoring logic
  */
 export const swarm_record_outcome = tool({
@@ -1402,6 +1866,10 @@ export const swarm_record_outcome = tool({
       .describe(
         "Criteria to generate feedback for (default: all default criteria)",
       ),
+    strategy: tool.schema
+      .enum(["file-based", "feature-based", "risk-based"])
+      .optional()
+      .describe("Decomposition strategy used for this task"),
   },
   async execute(args) {
     // Build outcome signals
@@ -1413,6 +1881,7 @@ export const swarm_record_outcome = tool({
       success: args.success,
       files_touched: args.files_touched ?? [],
       timestamp: new Date().toISOString(),
+      strategy: args.strategy as LearningDecompositionStrategy | undefined,
     };
 
     // Validate signals
@@ -1431,9 +1900,15 @@ export const swarm_record_outcome = tool({
       "patterns",
       "readable",
     ];
-    const feedbackEvents: FeedbackEvent[] = criteriaToScore.map((criterion) =>
-      outcomeToFeedback(scored, criterion),
-    );
+    const feedbackEvents: FeedbackEvent[] = criteriaToScore.map((criterion) => {
+      const event = outcomeToFeedback(scored, criterion);
+      // Include strategy in feedback context for future analysis
+      if (args.strategy) {
+        event.context =
+          `${event.context || ""} [strategy: ${args.strategy}]`.trim();
+      }
+      return event;
+    });
 
     return JSON.stringify(
       {
@@ -1453,6 +1928,7 @@ export const swarm_record_outcome = tool({
           error_count: args.error_count ?? 0,
           retry_count: args.retry_count ?? 0,
           success: args.success,
+          strategy: args.strategy,
         },
         note: "Feedback events should be stored for criterion weight calculation. Use learning.ts functions to apply weights.",
       },
@@ -1827,6 +2303,8 @@ export const swarm_init = tool({
 
 export const swarmTools = {
   swarm_init: swarm_init,
+  swarm_select_strategy: swarm_select_strategy,
+  swarm_plan_prompt: swarm_plan_prompt,
   swarm_decompose: swarm_decompose,
   swarm_validate_decomposition: swarm_validate_decomposition,
   swarm_status: swarm_status,
