@@ -3,21 +3,29 @@
 [![npm version](https://img.shields.io/npm/v/opencode-swarm-plugin.svg)](https://www.npmjs.com/package/opencode-swarm-plugin)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Type-safe multi-agent coordination for OpenCode with beads integration and Agent Mail.
+Multi-agent swarm coordination for [OpenCode](https://opencode.ai) with learning capabilities, beads integration, and Agent Mail.
 
 ## Overview
 
-This plugin provides structured, validated tools for multi-agent workflows in OpenCode:
+This plugin provides intelligent, self-improving tools for multi-agent workflows in OpenCode:
 
 - **Type-safe beads operations** - Zod-validated wrappers around the `bd` CLI with proper error handling
 - **Agent Mail integration** - File reservations, async messaging, and thread coordination between agents
 - **Structured outputs** - Reliable JSON responses with schema validation and retry support
 - **Swarm primitives** - Task decomposition, status tracking, and parallel agent coordination
+- **Learning from outcomes** - Confidence decay, implicit feedback scoring, and pattern maturity tracking
+- **Anti-pattern detection** - Automatically learns what decomposition strategies fail and avoids them
+- **Pre-completion validation** - UBS bug scanning before marking tasks complete
+- **History-informed decomposition** - Queries CASS for similar past tasks to inform strategy
 
 ## Installation
 
 ```bash
+npm install opencode-swarm-plugin
+# or
 bun add opencode-swarm-plugin
+# or
+pnpm add opencode-swarm-plugin
 ```
 
 Copy the plugin to your OpenCode plugins directory:
@@ -30,7 +38,7 @@ Plugins are automatically loaded from `~/.config/opencode/plugin/` - no config f
 
 > **Note:** The package has two entry points:
 >
-> - `dist/index.js` - Full library exports (schemas, errors, utilities)
+> - `dist/index.js` - Full library exports (schemas, errors, utilities, learning modules)
 > - `dist/plugin.js` - Plugin entry point that only exports the `plugin` function for OpenCode
 
 ## Prerequisites
@@ -84,18 +92,46 @@ bd --version
 | `agentmail_search`           | Search messages (FTS5 syntax)                        |
 | `agentmail_health`           | Check if Agent Mail server is running                |
 
+### Swarm Tools
+
+| Tool                           | Description                                                              |
+| ------------------------------ | ------------------------------------------------------------------------ |
+| `swarm_decompose`              | Generate decomposition prompt, optionally queries CASS for similar tasks |
+| `swarm_validate_decomposition` | Validate decomposition response, detect instruction conflicts            |
+| `swarm_status`                 | Get swarm status by epic ID                                              |
+| `swarm_progress`               | Report progress on a subtask                                             |
+| `swarm_complete`               | Mark subtask complete with UBS bug scan, release reservations            |
+| `swarm_record_outcome`         | Record outcome for implicit feedback (duration, errors, retries)         |
+| `swarm_subtask_prompt`         | Generate prompt for spawned subtask agent                                |
+| `swarm_evaluation_prompt`      | Generate self-evaluation prompt                                          |
+
+### Structured Output Tools
+
+| Tool                             | Description                                              |
+| -------------------------------- | -------------------------------------------------------- |
+| `structured_extract_json`        | Extract JSON from markdown/text with multiple strategies |
+| `structured_validate`            | Validate response against named schema                   |
+| `structured_parse_evaluation`    | Parse and validate evaluation response                   |
+| `structured_parse_decomposition` | Parse and validate task decomposition                    |
+| `structured_parse_bead_tree`     | Parse and validate bead tree for epic creation           |
+
 ### Schemas (for structured outputs)
 
 The plugin exports Zod schemas for validated agent responses:
 
-| Schema                    | Purpose                                     |
-| ------------------------- | ------------------------------------------- |
-| `TaskDecompositionSchema` | Decompose task into parallelizable subtasks |
-| `EvaluationSchema`        | Agent self-evaluation of completed work     |
-| `SwarmStatusSchema`       | Swarm progress tracking                     |
-| `SwarmSpawnResultSchema`  | Result of spawning agent swarm              |
-| `BeadSchema`              | Validated bead data                         |
-| `EpicCreateResultSchema`  | Atomic epic creation result                 |
+| Schema                       | Purpose                                      |
+| ---------------------------- | -------------------------------------------- |
+| `TaskDecompositionSchema`    | Decompose task into parallelizable subtasks  |
+| `EvaluationSchema`           | Agent self-evaluation of completed work      |
+| `WeightedEvaluationSchema`   | Evaluation with confidence-weighted criteria |
+| `SwarmStatusSchema`          | Swarm progress tracking                      |
+| `SwarmSpawnResultSchema`     | Result of spawning agent swarm               |
+| `BeadSchema`                 | Validated bead data                          |
+| `EpicCreateResultSchema`     | Atomic epic creation result                  |
+| `FeedbackEventSchema`        | Feedback event for learning                  |
+| `OutcomeSignalsSchema`       | Implicit feedback from task outcomes         |
+| `DecompositionPatternSchema` | Tracked decomposition pattern                |
+| `PatternMaturitySchema`      | Pattern maturity state tracking              |
 
 ## Usage Examples
 
@@ -203,6 +239,116 @@ const summary = await tools["agentmail_summarize_thread"]({
   thread_id: epic.epic.id,
   include_examples: true,
 });
+```
+
+## Learning Capabilities
+
+The plugin learns from swarm outcomes to improve future decompositions.
+
+### Confidence Decay
+
+Evaluation criteria weights decay over time unless revalidated. If a criterion (e.g., `type_safe`) has been historically unreliable, its weight decreases.
+
+```typescript
+import {
+  calculateDecayedValue,
+  calculateCriterionWeight,
+} from "opencode-swarm-plugin";
+
+// Value decays by 50% every 90 days (configurable half-life)
+const weight = calculateDecayedValue(timestamp, now, halfLifeDays);
+
+// Calculate criterion weight from feedback history
+const criterionWeight = calculateCriterionWeight(feedbackEvents);
+// { criterion: "type_safe", weight: 0.85, helpful_count: 10, harmful_count: 2 }
+```
+
+### Implicit Feedback Scoring
+
+The `swarm_record_outcome` tool tracks task outcomes and infers feedback:
+
+- **Fast completion + success** → helpful signal
+- **Slow completion + errors + retries** → harmful signal
+
+```typescript
+// Record outcome after completing a subtask
+await tools["swarm_record_outcome"]({
+  bead_id: "bd-abc123.1",
+  duration_ms: 60000,
+  error_count: 0,
+  retry_count: 0,
+  success: true,
+  files_touched: ["src/auth.ts"],
+});
+// Returns feedback events for each criterion
+```
+
+### Anti-Pattern Learning
+
+Failed decomposition patterns are automatically inverted to anti-patterns:
+
+```typescript
+import {
+  recordPatternObservation,
+  formatAntiPatternsForPrompt,
+} from "opencode-swarm-plugin";
+
+// Record pattern failure
+const result = recordPatternObservation(pattern, false, beadId);
+if (result.inversion) {
+  // Pattern was inverted: "Split by file type" → "AVOID: Split by file type. Failed 4/5 times (80% failure rate)"
+}
+
+// Include anti-patterns in decomposition prompts
+const antiPatternContext = formatAntiPatternsForPrompt(patterns);
+```
+
+### Pattern Maturity
+
+Patterns progress through maturity states: `candidate` → `established` → `proven` (or `deprecated`).
+
+```typescript
+import {
+  calculateMaturityState,
+  getMaturityMultiplier,
+} from "opencode-swarm-plugin";
+
+// Calculate state from feedback
+const state = calculateMaturityState(feedbackEvents);
+// "candidate" | "established" | "proven" | "deprecated"
+
+// Get weight multiplier for pattern ranking
+const multiplier = getMaturityMultiplier("proven"); // 1.5
+```
+
+### UBS Pre-Completion Scan
+
+The `swarm_complete` tool runs UBS (Ultimate Bug Scanner) on modified files before marking complete:
+
+```typescript
+await tools["swarm_complete"]({
+  project_key: "/path/to/project",
+  agent_name: "BlueLake",
+  bead_id: "bd-abc123.1",
+  summary: "Implemented auth flow",
+  files_touched: ["src/auth.ts", "src/middleware.ts"],
+  // skip_ubs_scan: true  // Optional: bypass scan
+});
+// Blocks completion if critical bugs found
+```
+
+### CASS History Context
+
+The `swarm_decompose` tool queries CASS (Cross-Agent Session Search) for similar past tasks:
+
+```typescript
+await tools["swarm_decompose"]({
+  task: "Add user authentication with OAuth",
+  max_subtasks: 5,
+  query_cass: true, // Default: true
+  cass_limit: 3, // Max results to include
+});
+// Includes successful patterns from past decompositions in context
 ```
 
 ## Context Preservation

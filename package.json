@@ -1,7 +1,7 @@
 {
   "name": "opencode-swarm-plugin",
-  "version": "0.1.0",
-  "description": "OpenCode plugin for type-safe swarm coordination with Agent Mail integration",
+  "version": "0.2.0",
+  "description": "Multi-agent swarm coordination for OpenCode with learning capabilities, beads integration, and Agent Mail",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -14,8 +14,12 @@
   "scripts": {
     "build": "bun build ./src/index.ts --outdir ./dist --target bun && bun build ./src/plugin.ts --outfile ./dist/plugin.js --target bun",
     "dev": "bun --watch src/index.ts",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "bun test src/schemas/",
+    "test:watch": "bun test --watch",
+    "test:integration": "bun test src/*.integration.test.ts",
+    "test:all": "bun test",
+    "docker:test": "docker compose up --build --abort-on-container-exit --exit-code-from test-runner",
+    "docker:down": "docker compose down -v",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
@@ -37,7 +41,11 @@
     "swarm",
     "agent-mail",
     "beads",
-    "multi-agent"
+    "multi-agent",
+    "ai-agents",
+    "machine-learning",
+    "task-decomposition",
+    "coordination"
   ],
   "author": "Joel Hooks",
   "license": "MIT",
