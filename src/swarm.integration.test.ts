@@ -7,7 +7,7 @@
  *
  * Run with: pnpm test:integration (or docker:test for full Docker environment)
  */
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   swarm_decompose,
   swarm_validate_decomposition,
@@ -277,8 +277,8 @@ describe("swarm_subtask_prompt", () => {
     expect(result).toContain("Configure Google OAuth");
     expect(result).toContain("src/auth/google.ts");
     expect(result).toContain("NextAuth.js v5");
-    expect(result).toContain("swarm:progress");
-    expect(result).toContain("swarm:complete");
+    expect(result).toContain("swarm_progress");
+    expect(result).toContain("swarm_complete");
   });
 
   it("handles missing optional fields", async () => {
@@ -760,4 +760,195 @@ describe("full swarm flow (integration)", () => {
       }
     },
   );
+});
+
+// ============================================================================
+// Tool Availability & Graceful Degradation Tests
+// ============================================================================
+
+import {
+  checkTool,
+  isToolAvailable,
+  checkAllTools,
+  formatToolAvailability,
+  resetToolCache,
+  withToolFallback,
+  ifToolAvailable,
+} from "./tool-availability";
+import { swarm_init } from "./swarm";
+
+describe("Tool Availability", () => {
+  beforeAll(() => {
+    resetToolCache();
+  });
+
+  afterAll(() => {
+    resetToolCache();
+  });
+
+  it("checks individual tool availability", async () => {
+    const status = await checkTool("semantic-memory");
+    expect(status).toHaveProperty("available");
+    expect(status).toHaveProperty("checkedAt");
+    expect(typeof status.available).toBe("boolean");
+  });
+
+  it("caches tool availability checks", async () => {
+    const status1 = await checkTool("semantic-memory");
+    const status2 = await checkTool("semantic-memory");
+    // Same timestamp means cached
+    expect(status1.checkedAt).toBe(status2.checkedAt);
+  });
+
+  it("checks all tools at once", async () => {
+    const availability = await checkAllTools();
+    expect(availability.size).toBe(5);
+    expect(availability.has("semantic-memory")).toBe(true);
+    expect(availability.has("cass")).toBe(true);
+    expect(availability.has("ubs")).toBe(true);
+    expect(availability.has("beads")).toBe(true);
+    expect(availability.has("agent-mail")).toBe(true);
+  });
+
+  it("formats tool availability for display", async () => {
+    const availability = await checkAllTools();
+    const formatted = formatToolAvailability(availability);
+    expect(formatted).toContain("Tool Availability:");
+    expect(formatted).toContain("semantic-memory");
+  });
+
+  it("executes with fallback when tool unavailable", async () => {
+    // Force cache reset to test fresh
+    resetToolCache();
+
+    const result = await withToolFallback(
+      "ubs", // May or may not be available
+      async () => "action-result",
+      () => "fallback-result",
+    );
+
+    // Either result is valid depending on tool availability
+    expect(["action-result", "fallback-result"]).toContain(result);
+  });
+
+  it("returns undefined when tool unavailable with ifToolAvailable", async () => {
+    resetToolCache();
+
+    // This will return undefined if agent-mail is not running
+    const result = await ifToolAvailable("agent-mail", async () => "success");
+
+    // Result is either "success" or undefined
+    expect([undefined, "success"]).toContain(result);
+  });
+});
+
+describe("swarm_init", () => {
+  it("reports tool availability status", async () => {
+    resetToolCache();
+
+    const result = await swarm_init.execute({}, mockContext);
+    const parsed = JSON.parse(result);
+
+    expect(parsed).toHaveProperty("ready", true);
+    expect(parsed).toHaveProperty("tool_availability");
+    expect(parsed).toHaveProperty("report");
+
+    // Check tool availability structure
+    const tools = parsed.tool_availability;
+    expect(tools).toHaveProperty("semantic-memory");
+    expect(tools).toHaveProperty("cass");
+    expect(tools).toHaveProperty("ubs");
+    expect(tools).toHaveProperty("beads");
+    expect(tools).toHaveProperty("agent-mail");
+
+    // Each tool should have available and fallback
+    for (const [, info] of Object.entries(tools)) {
+      expect(info).toHaveProperty("available");
+      expect(info).toHaveProperty("fallback");
+    }
+  });
+
+  it("includes recommendations", async () => {
+    const result = await swarm_init.execute({}, mockContext);
+    const parsed = JSON.parse(result);
+
+    expect(parsed).toHaveProperty("recommendations");
+    expect(parsed.recommendations).toHaveProperty("beads");
+    expect(parsed.recommendations).toHaveProperty("agent_mail");
+  });
+});
+
+describe("Graceful Degradation", () => {
+  it("swarm_decompose works without CASS", async () => {
+    // This should work regardless of CASS availability
+    const result = await swarm_decompose.execute(
+      {
+        task: "Add user authentication",
+        max_subtasks: 3,
+        query_cass: true, // Request CASS but it may not be available
+      },
+      mockContext,
+    );
+
+    const parsed = JSON.parse(result);
+
+    // Should always return a valid prompt
+    expect(parsed).toHaveProperty("prompt");
+    expect(parsed.prompt).toContain("Add user authentication");
+
+    // CASS history should indicate whether it was queried
+    expect(parsed).toHaveProperty("cass_history");
+    expect(parsed.cass_history).toHaveProperty("queried");
+  });
+
+  it("swarm_decompose can skip CASS explicitly", async () => {
+    const result = await swarm_decompose.execute(
+      {
+        task: "Add user authentication",
+        max_subtasks: 3,
+        query_cass: false, // Explicitly skip CASS
+      },
+      mockContext,
+    );
+
+    const parsed = JSON.parse(result);
+
+    expect(parsed.cass_history.queried).toBe(false);
+  });
+
+  it("decomposition prompt includes beads discipline", async () => {
+    const result = await swarm_decompose.execute(
+      {
+        task: "Build feature X",
+        max_subtasks: 3,
+      },
+      mockContext,
+    );
+
+    const parsed = JSON.parse(result);
+
+    // Check that beads discipline is in the prompt
+    expect(parsed.prompt).toContain("MANDATORY");
+    expect(parsed.prompt).toContain("bead");
+    expect(parsed.prompt).toContain("Plan aggressively");
+  });
+
+  it("subtask prompt includes agent-mail discipline", async () => {
+    const result = await swarm_subtask_prompt.execute(
+      {
+        agent_name: "TestAgent",
+        bead_id: "bd-test123.1",
+        epic_id: "bd-test123",
+        subtask_title: "Test task",
+        files: ["src/test.ts"],
+      },
+      mockContext,
+    );
+
+    // Check that agent-mail discipline is in the prompt
+    expect(result).toContain("MANDATORY");
+    expect(result).toContain("Agent Mail");
+    expect(result).toContain("agentmail_send");
+    expect(result).toContain("Report progress");
+  });
 });

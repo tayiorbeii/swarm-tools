@@ -9,9 +9,14 @@
  * - fetch_inbox ALWAYS limits to 5 messages max
  * - Use summarize_thread instead of fetching all messages
  * - Auto-release reservations when tasks complete
+ *
+ * GRACEFUL DEGRADATION:
+ * - If Agent Mail server is not running, tools return helpful error messages
+ * - Swarm can still function without Agent Mail (just no coordination)
  */
 import { tool } from "@opencode-ai/plugin";
 import { z } from "zod";
+import { isToolAvailable, warnMissingTool } from "./tool-availability";
 
 // ============================================================================
 // Configuration
@@ -163,13 +168,35 @@ interface MCPToolResult<T = unknown> {
   isError?: boolean;
 }
 
+/** Cached availability check result */
+let agentMailAvailable: boolean | null = null;
+
+/**
+ * Check if Agent Mail server is available (cached)
+ */
+async function checkAgentMailAvailable(): Promise<boolean> {
+  if (agentMailAvailable !== null) {
+    return agentMailAvailable;
+  }
+
+  agentMailAvailable = await isToolAvailable("agent-mail");
+  return agentMailAvailable;
+}
+
+/**
+ * Reset availability cache (for testing)
+ */
+export function resetAgentMailCache(): void {
+  agentMailAvailable = null;
+}
+
 /**
  * Call an Agent Mail MCP tool
  *
  * Handles both direct results (mock server) and wrapped results (real server).
  * Real Agent Mail returns: { content: [...], structuredContent: {...} }
  */
-async function mcpCall<T>(
+export async function mcpCall<T>(
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<T> {
@@ -281,6 +308,23 @@ export const agentmail_init = tool({
       .describe("Description of current task"),
   },
   async execute(args, ctx) {
+    // Check if Agent Mail is available
+    const available = await checkAgentMailAvailable();
+    if (!available) {
+      warnMissingTool("agent-mail");
+      return JSON.stringify(
+        {
+          error: "Agent Mail server not available",
+          available: false,
+          hint: "Start Agent Mail with: agent-mail serve",
+          fallback:
+            "Swarm will continue without multi-agent coordination. File conflicts possible if multiple agents active.",
+        },
+        null,
+        2,
+      );
+    }
+
     // 1. Ensure project exists
     const project = await mcpCall<ProjectInfo>("ensure_project", {
       human_key: args.project_path,
@@ -304,7 +348,7 @@ export const agentmail_init = tool({
     };
     setState(ctx.sessionID, state);
 
-    return JSON.stringify({ project, agent }, null, 2);
+    return JSON.stringify({ project, agent, available: true }, null, 2);
   },
 });
 
@@ -654,7 +698,6 @@ export const agentMailTools = {
 // ============================================================================
 
 export {
-  mcpCall,
   requireState,
   setState,
   getState,

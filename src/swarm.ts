@@ -35,6 +35,13 @@ import {
   type FeedbackEvent,
   DEFAULT_LEARNING_CONFIG,
 } from "./learning";
+import {
+  isToolAvailable,
+  warnMissingTool,
+  checkAllTools,
+  formatToolAvailability,
+  type ToolName,
+} from "./tool-availability";
 
 // ============================================================================
 // Conflict Detection
@@ -203,6 +210,18 @@ export const DECOMPOSITION_PROMPT = `You are decomposing a task into paralleliza
 
 {context_section}
 
+## MANDATORY: Beads Issue Tracking
+
+**Every subtask MUST become a bead.** This is non-negotiable.
+
+After decomposition, the coordinator will:
+1. Create an epic bead for the overall task
+2. Create child beads for each subtask
+3. Track progress through bead status updates
+4. Close beads with summaries when complete
+
+Agents MUST update their bead status as they work. No silent progress.
+
 ## Requirements
 
 1. **Break into 2-{max_subtasks} independent subtasks** that can run in parallel
@@ -210,6 +229,7 @@ export const DECOMPOSITION_PROMPT = `You are decomposing a task into paralleliza
 3. **No file overlap** - files cannot appear in multiple subtasks (they get exclusive locks)
 4. **Order by dependency** - if subtask B needs subtask A's output, A must come first in the array
 5. **Estimate complexity** - 1 (trivial) to 5 (complex)
+6. **Plan aggressively** - break down more than you think necessary, smaller is better
 
 ## Response Format
 
@@ -236,10 +256,12 @@ Respond with a JSON object matching this schema:
 
 ## Guidelines
 
+- **Plan aggressively** - when in doubt, split further. 3 small tasks > 1 medium task
 - **Prefer smaller, focused subtasks** over large complex ones
 - **Include test files** in the same subtask as the code they test
 - **Consider shared types** - if multiple files share types, handle that first
 - **Think about imports** - changes to exported APIs affect downstream files
+- **Explicit > implicit** - spell out what each subtask should do, don't assume
 
 ## File Assignment Examples
 
@@ -277,19 +299,49 @@ send a message to the coordinator requesting the change.
 ## Shared Context
 {shared_context}
 
+## MANDATORY: Beads Tracking
+
+You MUST keep your bead updated as you work:
+
+1. **Your bead is already in_progress** - don't change this unless blocked
+2. **If blocked**: \`bd update {bead_id} --status blocked\` and message coordinator
+3. **When done**: Use \`swarm_complete\` - it closes your bead automatically
+4. **Discovered issues**: Create new beads with \`bd create "issue" -t bug\`
+
+**Never work silently.** Your bead status is how the swarm tracks progress.
+
+## MANDATORY: Agent Mail Communication
+
+You MUST communicate with other agents:
+
+1. **Report progress** every significant milestone (not just at the end)
+2. **Ask questions** if requirements are unclear - don't guess
+3. **Announce blockers** immediately - don't spin trying to fix alone
+4. **Coordinate on shared concerns** - if you see something affecting other agents, say so
+
+Use Agent Mail for all communication:
+\`\`\`
+agentmail_send(
+  to: ["coordinator" or specific agent],
+  subject: "Brief subject",
+  body: "Message content",
+  thread_id: "{epic_id}"
+)
+\`\`\`
+
 ## Coordination Protocol
 
 1. **Start**: Your bead is already marked in_progress
-2. **Progress**: Use swarm:progress to report status updates
-3. **Blocked**: If you hit a blocker, report it - don't spin
-4. **Complete**: Use swarm:complete when done - it handles:
+2. **Progress**: Use swarm_progress to report status updates
+3. **Blocked**: Report immediately via Agent Mail - don't spin
+4. **Complete**: Use swarm_complete when done - it handles:
    - Closing your bead with a summary
    - Releasing file reservations
    - Notifying the coordinator
 
 ## Self-Evaluation
 
-Before calling swarm:complete, evaluate your work:
+Before calling swarm_complete, evaluate your work:
 - Type safety: Does it compile without errors?
 - No obvious bugs: Did you handle edge cases?
 - Follows patterns: Does it match existing code style?
@@ -297,17 +349,13 @@ Before calling swarm:complete, evaluate your work:
 
 If evaluation fails, fix the issues before completing.
 
-## Communication
+## Planning Your Work
 
-To message other agents or the coordinator:
-\`\`\`
-agent-mail:send(
-  to: ["coordinator_name" or other agent],
-  subject: "Brief subject",
-  body: "Message content",
-  thread_id: "{epic_id}"
-)
-\`\`\`
+Before writing code:
+1. **Read the files** you're assigned to understand current state
+2. **Plan your approach** - what changes, in what order?
+3. **Identify risks** - what could go wrong? What dependencies?
+4. **Communicate your plan** via Agent Mail if non-trivial
 
 Begin work on your subtask now.`;
 
@@ -440,15 +488,23 @@ export function formatEvaluationPrompt(params: {
  * Query beads for subtasks of an epic
  */
 async function queryEpicSubtasks(epicId: string): Promise<Bead[]> {
+  // Check if beads is available
+  const beadsAvailable = await isToolAvailable("beads");
+  if (!beadsAvailable) {
+    warnMissingTool("beads");
+    return []; // Return empty - swarm can still function without status tracking
+  }
+
   const result = await Bun.$`bd list --parent ${epicId} --json`
     .quiet()
     .nothrow();
 
   if (result.exitCode !== 0) {
-    throw new SwarmError(
-      `Failed to query subtasks: ${result.stderr.toString()}`,
-      "query_subtasks",
+    // Don't throw - just return empty and warn
+    console.warn(
+      `[swarm] Failed to query subtasks: ${result.stderr.toString()}`,
     );
+    return [];
   }
 
   try {
@@ -456,11 +512,8 @@ async function queryEpicSubtasks(epicId: string): Promise<Bead[]> {
     return z.array(BeadSchema).parse(parsed);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      throw new SwarmError(
-        `Invalid bead data: ${error.message}`,
-        "query_subtasks",
-        error.issues,
-      );
+      console.warn(`[swarm] Invalid bead data: ${error.message}`);
+      return [];
     }
     throw error;
   }
@@ -473,6 +526,13 @@ async function querySwarmMessages(
   projectKey: string,
   threadId: string,
 ): Promise<number> {
+  // Check if agent-mail is available
+  const agentMailAvailable = await isToolAvailable("agent-mail");
+  if (!agentMailAvailable) {
+    // Don't warn here - it's checked elsewhere
+    return 0;
+  }
+
   try {
     interface ThreadSummary {
       summary: { total_messages: number };
@@ -539,15 +599,17 @@ async function queryCassHistory(
   task: string,
   limit: number = 3,
 ): Promise<CassSearchResult | null> {
+  // Check if CASS is available first
+  const cassAvailable = await isToolAvailable("cass");
+  if (!cassAvailable) {
+    warnMissingTool("cass");
+    return null;
+  }
+
   try {
     const result = await Bun.$`cass search ${task} --limit ${limit} --json`
       .quiet()
       .nothrow();
-
-    if (result.exitCode === 127) {
-      // CASS not installed
-      return null;
-    }
 
     if (result.exitCode !== 0) {
       return null;
@@ -1005,16 +1067,18 @@ async function runUbsScan(files: string[]): Promise<UbsScanResult | null> {
     return null;
   }
 
+  // Check if UBS is available first
+  const ubsAvailable = await isToolAvailable("ubs");
+  if (!ubsAvailable) {
+    warnMissingTool("ubs");
+    return null;
+  }
+
   try {
     // Run UBS scan with JSON output
     const result = await Bun.$`ubs scan ${files.join(" ")} --json`
       .quiet()
       .nothrow();
-
-    if (result.exitCode === 127) {
-      // UBS not installed
-      return null;
-    }
 
     const output = result.stdout.toString();
     if (!output.trim()) {
@@ -1395,11 +1459,100 @@ export const swarm_evaluation_prompt = tool({
   },
 });
 
+/**
+ * Initialize swarm and check tool availability
+ *
+ * Call this at the start of a swarm session to see what tools are available
+ * and what features will be degraded.
+ */
+export const swarm_init = tool({
+  description:
+    "Initialize swarm session and check tool availability. Call at swarm start to see what features are available.",
+  args: {
+    project_path: tool.schema
+      .string()
+      .optional()
+      .describe("Project path (for Agent Mail init)"),
+  },
+  async execute(args) {
+    // Check all tools
+    const availability = await checkAllTools();
+
+    // Build status report
+    const report = formatToolAvailability(availability);
+
+    // Check critical tools
+    const beadsAvailable = availability.get("beads")?.status.available ?? false;
+    const agentMailAvailable =
+      availability.get("agent-mail")?.status.available ?? false;
+
+    // Build warnings
+    const warnings: string[] = [];
+    const degradedFeatures: string[] = [];
+
+    if (!beadsAvailable) {
+      warnings.push(
+        "⚠️  beads (bd) not available - issue tracking disabled, swarm coordination will be limited",
+      );
+      degradedFeatures.push("issue tracking", "progress persistence");
+    }
+
+    if (!agentMailAvailable) {
+      warnings.push(
+        "⚠️  agent-mail not available - multi-agent communication disabled",
+      );
+      degradedFeatures.push("agent communication", "file reservations");
+    }
+
+    if (!availability.get("cass")?.status.available) {
+      degradedFeatures.push("historical context from past sessions");
+    }
+
+    if (!availability.get("ubs")?.status.available) {
+      degradedFeatures.push("pre-completion bug scanning");
+    }
+
+    if (!availability.get("semantic-memory")?.status.available) {
+      degradedFeatures.push("persistent learning (using in-memory fallback)");
+    }
+
+    return JSON.stringify(
+      {
+        ready: true,
+        tool_availability: Object.fromEntries(
+          Array.from(availability.entries()).map(([k, v]) => [
+            k,
+            {
+              available: v.status.available,
+              fallback: v.status.available ? null : v.fallbackBehavior,
+            },
+          ]),
+        ),
+        warnings: warnings.length > 0 ? warnings : undefined,
+        degraded_features:
+          degradedFeatures.length > 0 ? degradedFeatures : undefined,
+        recommendations: {
+          beads: beadsAvailable
+            ? "✓ Use beads for all task tracking"
+            : "Install beads: npm i -g @joelhooks/beads",
+          agent_mail: agentMailAvailable
+            ? "✓ Use Agent Mail for coordination"
+            : "Start Agent Mail: agent-mail serve",
+        },
+        report,
+      },
+      null,
+      2,
+    );
+  },
+});
+
 // ============================================================================
 // Export all tools
 // ============================================================================
 
 export const swarmTools = {
+  swarm_init: swarm_init,
   swarm_decompose: swarm_decompose,
   swarm_validate_decomposition: swarm_validate_decomposition,
   swarm_status: swarm_status,

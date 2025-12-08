@@ -295,3 +295,33 @@ export {
   type StorageBackend,
   type StorageCollections,
 } from "./storage";
+
+/**
+ * Re-export tool-availability module
+ *
+ * Includes:
+ * - checkTool, isToolAvailable - Check individual tool availability
+ * - checkAllTools - Check all tools at once
+ * - withToolFallback, ifToolAvailable - Execute with graceful fallback
+ * - formatToolAvailability - Format availability for display
+ * - resetToolCache - Reset cached availability (for testing)
+ *
+ * Types:
+ * - ToolName - Supported tool names
+ * - ToolStatus, ToolAvailability - Status types
+ */
+export {
+  checkTool,
+  isToolAvailable,
+  checkAllTools,
+  getToolAvailability,
+  withToolFallback,
+  ifToolAvailable,
+  warnMissingTool,
+  requireTool,
+  formatToolAvailability,
+  resetToolCache,
+  type ToolName,
+  type ToolStatus,
+  type ToolAvailability,
+} from "./tool-availability";

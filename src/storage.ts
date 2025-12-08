@@ -38,6 +38,65 @@ import { InMemoryPatternStorage } from "./anti-patterns";
 import { InMemoryMaturityStorage } from "./pattern-maturity";
 
 // ============================================================================
+// Command Resolution
+// ============================================================================
+
+/**
+ * Cached semantic-memory command (native or bunx fallback)
+ */
+let cachedCommand: string[] | null = null;
+
+/**
+ * Resolve the semantic-memory command
+ *
+ * Checks for native install first, falls back to bunx.
+ * Result is cached for the session.
+ */
+async function resolveSemanticMemoryCommand(): Promise<string[]> {
+  if (cachedCommand) return cachedCommand;
+
+  // Try native install first
+  const nativeResult = await Bun.$`which semantic-memory`.quiet().nothrow();
+  if (nativeResult.exitCode === 0) {
+    cachedCommand = ["semantic-memory"];
+    return cachedCommand;
+  }
+
+  // Fall back to bunx
+  cachedCommand = ["bunx", "semantic-memory"];
+  return cachedCommand;
+}
+
+/**
+ * Execute semantic-memory command with args
+ */
+async function execSemanticMemory(
+  args: string[],
+): Promise<{ exitCode: number; stdout: Buffer; stderr: Buffer }> {
+  const cmd = await resolveSemanticMemoryCommand();
+  const fullCmd = [...cmd, ...args];
+
+  // Use Bun.spawn for dynamic command arrays
+  const proc = Bun.spawn(fullCmd, {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  const stdout = Buffer.from(await new Response(proc.stdout).arrayBuffer());
+  const stderr = Buffer.from(await new Response(proc.stderr).arrayBuffer());
+  const exitCode = await proc.exited;
+
+  return { exitCode, stdout, stderr };
+}
+
+/**
+ * Reset the cached command (for testing)
+ */
+export function resetCommandCache(): void {
+  cachedCommand = null;
+}
+
+// ============================================================================
 // Configuration
 // ============================================================================
 
@@ -142,11 +201,13 @@ export class SemanticMemoryStorage implements LearningStorage {
     metadata?: Record<string, unknown>,
   ): Promise<void> {
     const content = typeof data === "string" ? data : JSON.stringify(data);
-    const metaArg = metadata ? `--metadata '${JSON.stringify(metadata)}'` : "";
+    const args = ["store", content, "--collection", collection];
 
-    await Bun.$`semantic-memory store ${content} --collection ${collection} ${metaArg}`
-      .quiet()
-      .nothrow();
+    if (metadata) {
+      args.push("--metadata", JSON.stringify(metadata));
+    }
+
+    await execSemanticMemory(args);
   }
 
   private async find<T>(
@@ -155,11 +216,21 @@ export class SemanticMemoryStorage implements LearningStorage {
     limit: number = 10,
     useFts: boolean = false,
   ): Promise<T[]> {
-    const ftsArg = useFts ? "--fts" : "";
-    const result =
-      await Bun.$`semantic-memory find ${query} --collection ${collection} --limit ${limit} ${ftsArg} --json`
-        .quiet()
-        .nothrow();
+    const args = [
+      "find",
+      query,
+      "--collection",
+      collection,
+      "--limit",
+      String(limit),
+      "--json",
+    ];
+
+    if (useFts) {
+      args.push("--fts");
+    }
+
+    const result = await execSemanticMemory(args);
 
     if (result.exitCode !== 0) {
       return [];
@@ -188,10 +259,12 @@ export class SemanticMemoryStorage implements LearningStorage {
   }
 
   private async list<T>(collection: string): Promise<T[]> {
-    const result =
-      await Bun.$`semantic-memory list --collection ${collection} --json`
-        .quiet()
-        .nothrow();
+    const result = await execSemanticMemory([
+      "list",
+      "--collection",
+      collection,
+      "--json",
+    ]);
 
     if (result.exitCode !== 0) {
       return [];
@@ -279,13 +352,11 @@ export class SemanticMemoryStorage implements LearningStorage {
   }
 
   async getPattern(id: string): Promise<DecompositionPattern | null> {
-    const results = await this.find<DecompositionPattern>(
+    // List all and filter by ID - FTS search by ID is unreliable
+    const all = await this.list<DecompositionPattern>(
       this.config.collections.patterns,
-      id,
-      1,
-      true,
     );
-    return results[0] || null;
+    return all.find((p) => p.id === id) || null;
   }
 
   async getAllPatterns(): Promise<DecompositionPattern[]> {
@@ -331,13 +402,11 @@ export class SemanticMemoryStorage implements LearningStorage {
   }
 
   async getMaturity(patternId: string): Promise<PatternMaturity | null> {
-    const results = await this.find<PatternMaturity>(
+    // List all and filter by pattern_id - FTS search by ID is unreliable
+    const all = await this.list<PatternMaturity>(
       this.config.collections.maturity,
-      patternId,
-      1,
-      true,
     );
-    return results[0] || null;
+    return all.find((m) => m.pattern_id === patternId) || null;
   }
 
   async getAllMaturity(): Promise<PatternMaturity[]> {
@@ -358,12 +427,11 @@ export class SemanticMemoryStorage implements LearningStorage {
   }
 
   async getMaturityFeedback(patternId: string): Promise<MaturityFeedback[]> {
-    return this.find<MaturityFeedback>(
+    // List all and filter by pattern_id - FTS search by ID is unreliable
+    const all = await this.list<MaturityFeedback>(
       this.config.collections.maturity + "-feedback",
-      patternId,
-      100,
-      true,
     );
+    return all.filter((f) => f.pattern_id === patternId);
   }
 
   async close(): Promise<void> {
@@ -529,15 +597,22 @@ export function createStorage(
 }
 
 /**
- * Check if semantic-memory is available
+ * Check if semantic-memory is available (native or via bunx)
  */
 export async function isSemanticMemoryAvailable(): Promise<boolean> {
   try {
-    const result = await Bun.$`semantic-memory stats`.quiet().nothrow();
+    const result = await execSemanticMemory(["stats"]);
     return result.exitCode === 0;
   } catch {
     return false;
   }
+}
+
+/**
+ * Get the resolved semantic-memory command (for debugging/logging)
+ */
+export async function getResolvedCommand(): Promise<string[]> {
+  return resolveSemanticMemoryCommand();
 }
 
 /**

@@ -1342,10 +1342,12 @@ describe("Storage Module", () => {
       const pattern = createPattern("Test pattern for semantic search");
       await storage.storePattern(pattern);
 
+      // Give semantic-memory time to persist
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       const retrieved = await storage.getPattern(pattern.id);
       expect(retrieved).not.toBeNull();
+      expect(retrieved?.id).toBe(pattern.id);
     });
 
     it("closes without error", async () => {

@@ -17,6 +17,8 @@ This plugin provides intelligent, self-improving tools for multi-agent workflows
 - **Anti-pattern detection** - Automatically learns what decomposition strategies fail and avoids them
 - **Pre-completion validation** - UBS bug scanning before marking tasks complete
 - **History-informed decomposition** - Queries CASS for similar past tasks to inform strategy
+- **Graceful degradation** - Works with whatever tools are available, degrades features when tools missing
+- **Swarm discipline** - Enforces beads tracking, aggressive planning, and agent communication
 
 ## Installation
 
@@ -96,6 +98,7 @@ bd --version
 
 | Tool                           | Description                                                              |
 | ------------------------------ | ------------------------------------------------------------------------ |
+| `swarm_init`                   | Check tool availability, report degraded features                        |
 | `swarm_decompose`              | Generate decomposition prompt, optionally queries CASS for similar tasks |
 | `swarm_validate_decomposition` | Validate decomposition response, detect instruction conflicts            |
 | `swarm_status`                 | Get swarm status by epic ID                                              |
