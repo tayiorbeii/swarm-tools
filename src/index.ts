@@ -263,7 +263,9 @@ export {
   SwarmError,
   DecompositionError,
   formatSubtaskPrompt,
+  formatSubtaskPromptV2,
   formatEvaluationPrompt,
+  SUBTASK_PROMPT_V2,
 } from "./swarm";
 
 /**

@@ -17,6 +17,7 @@
 import { tool } from "@opencode-ai/plugin";
 import { z } from "zod";
 import { isToolAvailable, warnMissingTool } from "./tool-availability";
+import { getRateLimiter, type RateLimiter } from "./rate-limiter";
 
 // ============================================================================
 // Configuration
@@ -157,6 +158,24 @@ export class FileReservationConflictError extends Error {
   }
 }
 
+export class RateLimitExceededError extends Error {
+  constructor(
+    public readonly endpoint: string,
+    public readonly remaining: number,
+    public readonly resetAt: number,
+  ) {
+    const resetDate = new Date(resetAt);
+    const waitMs = Math.max(0, resetAt - Date.now());
+    const waitSec = Math.ceil(waitMs / 1000);
+    super(
+      `Rate limit exceeded for ${endpoint}. ` +
+        `${remaining} remaining. ` +
+        `Retry in ${waitSec}s (at ${resetDate.toISOString()})`,
+    );
+    this.name = "RateLimitExceededError";
+  }
+}
+
 // ============================================================================
 // MCP Client
 // ============================================================================
@@ -188,6 +207,73 @@ async function checkAgentMailAvailable(): Promise<boolean> {
  */
 export function resetAgentMailCache(): void {
   agentMailAvailable = null;
+}
+
+/** Cached rate limiter instance */
+let rateLimiter: RateLimiter | null = null;
+
+/** Whether rate limiting is enabled (can be disabled via env var) */
+const RATE_LIMITING_ENABLED =
+  process.env.OPENCODE_RATE_LIMIT_DISABLED !== "true";
+
+/**
+ * Check rate limit for an endpoint and throw if exceeded
+ *
+ * @param agentName - The agent making the request
+ * @param endpoint - The endpoint being accessed (e.g., "send", "inbox")
+ * @throws RateLimitExceededError if rate limit is exceeded
+ */
+async function checkRateLimit(
+  agentName: string,
+  endpoint: string,
+): Promise<void> {
+  if (!RATE_LIMITING_ENABLED) {
+    return;
+  }
+
+  if (!rateLimiter) {
+    rateLimiter = await getRateLimiter();
+  }
+
+  const result = await rateLimiter.checkLimit(agentName, endpoint);
+  if (!result.allowed) {
+    throw new RateLimitExceededError(
+      endpoint,
+      result.remaining,
+      result.resetAt,
+    );
+  }
+}
+
+/**
+ * Record a request against the rate limit (call after successful request)
+ *
+ * @param agentName - The agent making the request
+ * @param endpoint - The endpoint being accessed
+ */
+async function recordRateLimitedRequest(
+  agentName: string,
+  endpoint: string,
+): Promise<void> {
+  if (!RATE_LIMITING_ENABLED) {
+    return;
+  }
+
+  if (!rateLimiter) {
+    rateLimiter = await getRateLimiter();
+  }
+
+  await rateLimiter.recordRequest(agentName, endpoint);
+}
+
+/**
+ * Reset rate limiter (for testing)
+ */
+export async function resetRateLimiterCache(): Promise<void> {
+  if (rateLimiter) {
+    await rateLimiter.close();
+    rateLimiter = null;
+  }
 }
 
 /**
@@ -379,6 +465,9 @@ export const agentmail_send = tool({
   async execute(args, ctx) {
     const state = requireState(ctx.sessionID);
 
+    // Check rate limit before sending
+    await checkRateLimit(state.agentName, "send");
+
     await mcpCall("send_message", {
       project_key: state.projectKey,
       sender_name: state.agentName,
@@ -389,6 +478,9 @@ export const agentmail_send = tool({
       importance: args.importance || "normal",
       ack_required: args.ack_required || false,
     });
+
+    // Record successful request
+    await recordRateLimitedRequest(state.agentName, "send");
 
     return `Message sent to ${args.to.join(", ")}`;
   },
@@ -417,6 +509,9 @@ export const agentmail_inbox = tool({
   async execute(args, ctx) {
     const state = requireState(ctx.sessionID);
 
+    // Check rate limit
+    await checkRateLimit(state.agentName, "inbox");
+
     // CRITICAL: Enforce context-safe defaults
     const limit = Math.min(args.limit || MAX_INBOX_LIMIT, MAX_INBOX_LIMIT);
 
@@ -428,6 +523,9 @@ export const agentmail_inbox = tool({
       urgent_only: args.urgent_only || false,
       since_ts: args.since_ts,
     });
+
+    // Record successful request
+    await recordRateLimitedRequest(state.agentName, "inbox");
 
     return JSON.stringify(messages, null, 2);
   },
@@ -443,6 +541,9 @@ export const agentmail_read_message = tool({
   },
   async execute(args, ctx) {
     const state = requireState(ctx.sessionID);
+
+    // Check rate limit
+    await checkRateLimit(state.agentName, "read_message");
 
     // Mark as read
     await mcpCall("mark_message_read", {
@@ -465,6 +566,9 @@ export const agentmail_read_message = tool({
       return `Message ${args.message_id} not found`;
     }
 
+    // Record successful request
+    await recordRateLimitedRequest(state.agentName, "read_message");
+
     return JSON.stringify(message, null, 2);
   },
 });
@@ -484,12 +588,18 @@ export const agentmail_summarize_thread = tool({
   async execute(args, ctx) {
     const state = requireState(ctx.sessionID);
 
+    // Check rate limit
+    await checkRateLimit(state.agentName, "summarize_thread");
+
     const summary = await mcpCall<ThreadSummary>("summarize_thread", {
       project_key: state.projectKey,
       thread_id: args.thread_id,
       include_examples: args.include_examples || false,
       llm_mode: true, // Use LLM for better summaries
     });
+
+    // Record successful request
+    await recordRateLimitedRequest(state.agentName, "summarize_thread");
 
     return JSON.stringify(summary, null, 2);
   },
@@ -519,6 +629,9 @@ export const agentmail_reserve = tool({
   },
   async execute(args, ctx) {
     const state = requireState(ctx.sessionID);
+
+    // Check rate limit
+    await checkRateLimit(state.agentName, "reserve");
 
     const result = await mcpCall<ReservationResult>("file_reservation_paths", {
       project_key: state.projectKey,
@@ -563,6 +676,9 @@ export const agentmail_reserve = tool({
     state.reservations = [...state.reservations, ...reservationIds];
     setState(ctx.sessionID, state);
 
+    // Record successful request
+    await recordRateLimitedRequest(state.agentName, "reserve");
+
     if (granted.length === 0) {
       return "No paths were reserved (empty granted list)";
     }
@@ -591,6 +707,9 @@ export const agentmail_release = tool({
   async execute(args, ctx) {
     const state = requireState(ctx.sessionID);
 
+    // Check rate limit
+    await checkRateLimit(state.agentName, "release");
+
     const result = await mcpCall<{ released: number; released_at: string }>(
       "release_file_reservations",
       {
@@ -604,6 +723,9 @@ export const agentmail_release = tool({
     // Clear stored reservation IDs
     state.reservations = [];
     setState(ctx.sessionID, state);
+
+    // Record successful request
+    await recordRateLimitedRequest(state.agentName, "release");
 
     return `Released ${result.released} reservation(s)`;
   },
@@ -620,11 +742,17 @@ export const agentmail_ack = tool({
   async execute(args, ctx) {
     const state = requireState(ctx.sessionID);
 
+    // Check rate limit
+    await checkRateLimit(state.agentName, "ack");
+
     await mcpCall("acknowledge_message", {
       project_key: state.projectKey,
       agent_name: state.agentName,
       message_id: args.message_id,
     });
+
+    // Record successful request
+    await recordRateLimitedRequest(state.agentName, "ack");
 
     return `Acknowledged message ${args.message_id}`;
   },
@@ -647,11 +775,17 @@ export const agentmail_search = tool({
   async execute(args, ctx) {
     const state = requireState(ctx.sessionID);
 
+    // Check rate limit
+    await checkRateLimit(state.agentName, "search");
+
     const results = await mcpCall<MessageHeader[]>("search_messages", {
       project_key: state.projectKey,
       query: args.query,
       limit: args.limit || 20,
     });
+
+    // Record successful request
+    await recordRateLimitedRequest(state.agentName, "search");
 
     return JSON.stringify(results, null, 2);
   },

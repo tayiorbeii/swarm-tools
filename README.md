@@ -94,6 +94,38 @@ bd --version
 | `agentmail_search`           | Search messages (FTS5 syntax)                        |
 | `agentmail_health`           | Check if Agent Mail server is running                |
 
+## Rate Limiting
+
+Client-side, per-agent rate limits prevent abuse and ensure fair resource usage across agents. Uses Redis as primary store (`localhost:6379`) with automatic SQLite fallback (`~/.config/opencode/rate-limits.db`).
+
+### Default Limits
+
+| Endpoint           | Per Minute | Per Hour |
+| ------------------ | ---------- | -------- |
+| `send`             | 20         | 200      |
+| `reserve`          | 10         | 100      |
+| `release`          | 10         | 100      |
+| `ack`              | 20         | 200      |
+| `inbox`            | 60         | 600      |
+| `read_message`     | 60         | 600      |
+| `summarize_thread` | 30         | 300      |
+| `search`           | 30         | 300      |
+
+### Configuration
+
+| Environment Variable                      | Description                                                                 |
+| ----------------------------------------- | --------------------------------------------------------------------------- |
+| `OPENCODE_RATE_LIMIT_REDIS_URL`           | Redis connection URL (default: `redis://localhost:6379`)                    |
+| `OPENCODE_RATE_LIMIT_SQLITE_PATH`         | SQLite database path (default: `~/.config/opencode/rate-limits.db`)         |
+| `OPENCODE_RATE_LIMIT_{ENDPOINT}_PER_MIN`  | Per-minute limit for endpoint (e.g., `OPENCODE_RATE_LIMIT_SEND_PER_MIN=30`) |
+| `OPENCODE_RATE_LIMIT_{ENDPOINT}_PER_HOUR` | Per-hour limit for endpoint (e.g., `OPENCODE_RATE_LIMIT_SEND_PER_HOUR=300`) |
+
+### Troubleshooting
+
+- **Rate limit exceeded errors** - Adjust limits via environment variables for your workload
+- **Redis unavailable** - Automatic SQLite fallback with warning logged; no action needed
+- **SQLite cleanup** - Expired entries cleaned automatically on init
+
 ### Swarm Tools
 
 | Tool                           | Description                                                              |

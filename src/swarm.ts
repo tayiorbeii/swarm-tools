@@ -360,6 +360,92 @@ Before writing code:
 Begin work on your subtask now.`;
 
 /**
+ * Simplified subtask prompt for Task subagents (V2 - coordinator-centric)
+ *
+ * This prompt is designed for agents that DON'T have access to Agent Mail or beads tools.
+ * The coordinator handles all coordination - subagents just do the work and return results.
+ *
+ * Key differences from V1:
+ * - No Agent Mail instructions (subagents can't use it)
+ * - No beads instructions (subagents can't use it)
+ * - Expects structured JSON response for coordinator to process
+ */
+export const SUBTASK_PROMPT_V2 = `You are working on a subtask as part of a larger project.
+
+## Your Task
+**Title**: {subtask_title}
+
+{subtask_description}
+
+## Files to Modify
+{file_list}
+
+**IMPORTANT**: Only modify the files listed above. Do not create new files unless absolutely necessary for the task.
+
+## Context
+{shared_context}
+
+## Instructions
+
+1. **Read first** - Understand the current state of the files before making changes
+2. **Plan your approach** - Think through what changes are needed
+3. **Make the changes** - Implement the required functionality
+4. **Verify** - Check that your changes work (run tests/typecheck if applicable)
+
+## When Complete
+
+After finishing your work, provide a summary in this format:
+
+\`\`\`json
+{
+  "success": true,
+  "summary": "Brief description of what you accomplished",
+  "files_modified": ["list", "of", "files", "you", "changed"],
+  "files_created": ["any", "new", "files"],
+  "issues_found": ["any problems or concerns discovered"],
+  "tests_passed": true,
+  "notes": "Any additional context for the coordinator"
+}
+\`\`\`
+
+If you encounter a blocker you cannot resolve, return:
+
+\`\`\`json
+{
+  "success": false,
+  "summary": "What you attempted",
+  "blocker": "Description of what's blocking you",
+  "files_modified": [],
+  "suggestions": ["possible", "solutions"]
+}
+\`\`\`
+
+Begin work now.`;
+
+/**
+ * Format the V2 subtask prompt for a specific agent
+ */
+export function formatSubtaskPromptV2(params: {
+  subtask_title: string;
+  subtask_description: string;
+  files: string[];
+  shared_context?: string;
+}): string {
+  const fileList =
+    params.files.length > 0
+      ? params.files.map((f) => `- \`${f}\``).join("\n")
+      : "(no specific files assigned - use your judgment)";
+
+  return SUBTASK_PROMPT_V2.replace("{subtask_title}", params.subtask_title)
+    .replace(
+      "{subtask_description}",
+      params.subtask_description || "(see title)",
+    )
+    .replace("{file_list}", fileList)
+    .replace("{shared_context}", params.shared_context || "(none provided)");
+}
+
+/**
  * Prompt for self-evaluation before completing a subtask.
  *
  * Agents use this to assess their work quality before marking complete.
@@ -1419,6 +1505,196 @@ export const swarm_subtask_prompt = tool({
 });
 
 /**
+ * Prepare a subtask for spawning with Task tool (V2 prompt)
+ *
+ * This is a simplified tool for coordinators that generates a prompt using
+ * the V2 template (no Agent Mail/beads instructions - coordinator handles coordination).
+ * Returns JSON that can be directly used with Task tool.
+ */
+export const swarm_spawn_subtask = tool({
+  description:
+    "Prepare a subtask for spawning with Task tool. Returns prompt and metadata for coordinator to use.",
+  args: {
+    bead_id: tool.schema.string().describe("Subtask bead ID"),
+    subtask_title: tool.schema.string().describe("Subtask title"),
+    subtask_description: tool.schema
+      .string()
+      .optional()
+      .describe("Detailed subtask instructions"),
+    files: tool.schema
+      .array(tool.schema.string())
+      .describe("Files assigned to this subtask"),
+    shared_context: tool.schema
+      .string()
+      .optional()
+      .describe("Context shared across all agents"),
+  },
+  async execute(args) {
+    const prompt = formatSubtaskPromptV2({
+      subtask_title: args.subtask_title,
+      subtask_description: args.subtask_description || "",
+      files: args.files,
+      shared_context: args.shared_context,
+    });
+
+    return JSON.stringify(
+      {
+        prompt,
+        bead_id: args.bead_id,
+        files: args.files,
+      },
+      null,
+      2,
+    );
+  },
+});
+
+/**
+ * Schema for task agent result
+ */
+const TaskResultSchema = z.object({
+  success: z.boolean(),
+  summary: z.string(),
+  files_modified: z.array(z.string()).optional().default([]),
+  files_created: z.array(z.string()).optional().default([]),
+  issues_found: z.array(z.string()).optional().default([]),
+  tests_passed: z.boolean().optional(),
+  notes: z.string().optional(),
+  blocker: z.string().optional(),
+  suggestions: z.array(z.string()).optional(),
+});
+
+type TaskResult = z.infer<typeof TaskResultSchema>;
+
+/**
+ * Handle subtask completion from a Task agent
+ *
+ * This tool is for coordinators to process the result after a Task subagent
+ * returns. It parses the JSON result, closes the bead on success, and
+ * creates new beads for any issues discovered.
+ *
+ * @example
+ * // Task agent returns JSON:
+ * // { "success": true, "summary": "Added auth", "files_modified": ["src/auth.ts"], "issues_found": ["Missing tests"] }
+ * //
+ * // Coordinator calls:
+ * swarm_complete_subtask(bead_id="bd-123.1", task_result=<agent_response>)
+ */
+export const swarm_complete_subtask = tool({
+  description:
+    "Handle subtask completion after Task agent returns. Parses result JSON, closes bead on success, creates new beads for issues found.",
+  args: {
+    bead_id: z.string().describe("Subtask bead ID to close"),
+    task_result: z
+      .string()
+      .describe("JSON result from the Task agent (TaskResult schema)"),
+    files_touched: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Override files touched (uses task_result.files_modified if not provided)",
+      ),
+  },
+  async execute(args) {
+    // Parse the task result JSON
+    let result: TaskResult;
+    try {
+      const parsed = JSON.parse(args.task_result);
+      result = TaskResultSchema.parse(parsed);
+    } catch (error) {
+      // Handle parse errors gracefully
+      const errorMessage =
+        error instanceof SyntaxError
+          ? `Invalid JSON: ${error.message}`
+          : error instanceof z.ZodError
+            ? `Schema validation failed: ${error.issues.map((i) => i.message).join(", ")}`
+            : String(error);
+
+      return JSON.stringify(
+        {
+          success: false,
+          error: "Failed to parse task result",
+          details: errorMessage,
+          hint: "Task agent should return JSON matching TaskResult schema: { success, summary, files_modified?, issues_found?, ... }",
+        },
+        null,
+        2,
+      );
+    }
+
+    const filesTouched = args.files_touched ?? [
+      ...result.files_modified,
+      ...result.files_created,
+    ];
+    const issuesCreated: Array<{ title: string; id?: string }> = [];
+
+    // If task failed, don't close the bead - return info for coordinator to handle
+    if (!result.success) {
+      return JSON.stringify(
+        {
+          success: false,
+          bead_id: args.bead_id,
+          task_failed: true,
+          summary: result.summary,
+          blocker: result.blocker,
+          suggestions: result.suggestions,
+          files_touched: filesTouched,
+          action_needed:
+            "Task failed - review blocker and decide whether to retry or close as failed",
+        },
+        null,
+        2,
+      );
+    }
+
+    // Task succeeded - close the bead
+    const closeReason = result.summary.slice(0, 200); // Truncate for safety
+    await Bun.$`bd close ${args.bead_id} -r "${closeReason}"`.quiet().nothrow();
+
+    // Create new beads for each issue found
+    if (result.issues_found.length > 0) {
+      for (const issue of result.issues_found) {
+        const issueTitle = issue.slice(0, 100); // Truncate long titles
+        const createResult = await Bun.$`bd create "${issueTitle}" -t bug`
+          .quiet()
+          .nothrow();
+
+        if (createResult.exitCode === 0) {
+          // Try to parse the bead ID from output
+          const output = createResult.stdout.toString();
+          const idMatch = output.match(/bd-[a-z0-9]+/);
+          issuesCreated.push({
+            title: issueTitle,
+            id: idMatch?.[0],
+          });
+        } else {
+          issuesCreated.push({
+            title: issueTitle,
+            id: undefined, // Failed to create
+          });
+        }
+      }
+    }
+
+    return JSON.stringify(
+      {
+        success: true,
+        bead_id: args.bead_id,
+        bead_closed: true,
+        summary: result.summary,
+        files_touched: filesTouched,
+        tests_passed: result.tests_passed,
+        notes: result.notes,
+        issues_created: issuesCreated.length > 0 ? issuesCreated : undefined,
+        issues_count: issuesCreated.length,
+      },
+      null,
+      2,
+    );
+  },
+});
+
+/**
  * Generate self-evaluation prompt
  */
 export const swarm_evaluation_prompt = tool({
@@ -1560,5 +1836,7 @@ export const swarmTools = {
   swarm_complete: swarm_complete,
   swarm_record_outcome: swarm_record_outcome,
   swarm_subtask_prompt: swarm_subtask_prompt,
+  swarm_spawn_subtask: swarm_spawn_subtask,
+  swarm_complete_subtask: swarm_complete_subtask,
   swarm_evaluation_prompt: swarm_evaluation_prompt,
 };
