@@ -170,6 +170,111 @@ model: anthropic/claude-haiku-4-5 # Your chosen worker model
 
 Edit these files to customize behavior. Run `swarm setup` to regenerate defaults.
 
+## Skills
+
+Skills are reusable knowledge packages that agents can load on-demand. They contain domain expertise, workflows, and patterns that help agents perform specialized tasks.
+
+### Using Skills
+
+```bash
+# List available skills
+swarm tool skills_list
+
+# Read a skill's content
+swarm tool skills_read --json '{"name": "debugging"}'
+
+# Use a skill (get formatted for context injection)
+swarm tool skills_use --json '{"name": "code-review", "context": "reviewing a PR"}'
+```
+
+In OpenCode, agents can use skills directly:
+
+```
+skills_list()                           # See what's available
+skills_use(name="debugging")            # Load debugging patterns
+skills_use(name="swarm-coordination")   # Load swarm workflow
+```
+
+### Bundled Skills
+
+| Skill                        | Tags                 | Description                                                                          |
+| ---------------------------- | -------------------- | ------------------------------------------------------------------------------------ |
+| `agent-patterns`             | ai, agents, patterns | AI agent design patterns - capability whiteboards, architecture evolution, evals     |
+| `cli-builder`                | cli, typescript, bun | Building TypeScript CLIs with Bun - argument parsing, subcommands, output formatting |
+| `code-review`                | review, quality      | Code review patterns - systematic checklists, feedback patterns                      |
+| `debugging`                  | debugging, errors    | Systematic debugging - root cause analysis, error resolution                         |
+| `learning-systems`           | learning, feedback   | Implicit feedback scoring, confidence decay, anti-pattern detection                  |
+| `mcp-tool-authoring`         | mcp, tools           | Building MCP tools - schema definition, context passing, error handling              |
+| `resilience-patterns`        | errors, recovery     | Error recovery, retry strategies, graceful degradation                               |
+| `skill-creator`              | meta, skills         | Guide for creating effective skills                                                  |
+| `swarm-coordination`         | swarm, multi-agent   | Multi-agent coordination patterns for swarm workflows                                |
+| `tacit-knowledge-extraction` | knowledge, patterns  | Extracting tacit knowledge into pattern languages                                    |
+| `testing-strategies`         | testing, vitest      | Testing async/swarm operations, mocking patterns                                     |
+| `zod-validation`             | zod, typescript      | Schema validation patterns with Zod                                                  |
+
+### Skill Locations
+
+Skills are loaded from three locations (in order):
+
+1. **Project skills**: `.opencode/skills/`, `.claude/skills/`, or `skills/`
+2. **Global skills**: `~/.config/opencode/skills/`
+3. **Bundled skills**: Included with the plugin
+
+### Creating Skills
+
+```bash
+# Initialize project skills directory
+swarm tool skills_init
+
+# Create a new skill
+swarm tool skills_create --json '{"name": "my-skill", "description": "What it does", "tags": ["tag1", "tag2"]}'
+```
+
+Or use the `skill-creator` skill for guidance:
+
+```
+skills_use(name="skill-creator")
+```
+
+Each skill is a directory containing:
+
+```
+my-skill/
+  SKILL.md           # Main content (required)
+  references/        # Optional supporting files
+    patterns.md
+    examples.md
+```
+
+### SKILL.md Format
+
+```markdown
+---
+name: my-skill
+description: Brief description for discovery
+tags:
+  - tag1
+  - tag2
+---
+
+# My Skill
+
+## When to Use
+
+- Trigger condition 1
+- Trigger condition 2
+
+## Patterns
+
+### Pattern Name
+
+Description and examples...
+
+## Anti-Patterns
+
+What NOT to do...
+```
+
 ## Dependencies
 
 | Dependency                                                                                             | Purpose                                                      | Required |
