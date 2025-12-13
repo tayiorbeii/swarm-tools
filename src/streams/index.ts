@@ -101,6 +101,20 @@ export async function closeAllDatabases(): Promise<void> {
   }
 }
 
+/**
+ * Reset database for testing - clears all data but keeps schema
+ */
+export async function resetDatabase(projectPath?: string): Promise<void> {
+  const db = await getDatabase(projectPath);
+  await db.exec(`
+    DELETE FROM message_recipients;
+    DELETE FROM messages;
+    DELETE FROM reservations;
+    DELETE FROM agents;
+    DELETE FROM events;
+  `);
+}
+
 // ============================================================================
 // Schema Initialization
 // ============================================================================
@@ -249,3 +263,7 @@ export async function getDatabaseStats(projectPath?: string): Promise<{
 
 export { PGlite };
 export * from "./events";
+export * from "./store";
+export * from "./projections";
+export * from "./agent-mail";
+export * from "./debug";
