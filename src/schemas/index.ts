@@ -1,7 +1,30 @@
 /**
- * Schema exports
+ * Schema Definitions - Central export point for all Zod schemas
  *
- * Re-export all schemas for convenient importing.
+ * This module re-exports all schema definitions used throughout the plugin.
+ * Schemas are organized by domain:
+ *
+ * ## Bead Schemas (Issue Tracking)
+ * - `BeadSchema` - Core bead/issue definition
+ * - `BeadStatusSchema` - Status enum (open, in_progress, blocked, closed)
+ * - `BeadTypeSchema` - Type enum (bug, feature, task, epic, chore)
+ * - `SubtaskSpecSchema` - Subtask specification for epic creation
+ *
+ * ## Task Schemas (Swarm Decomposition)
+ * - `TaskDecompositionSchema` - Full task breakdown
+ * - `DecomposedSubtaskSchema` - Individual subtask definition
+ * - `BeadTreeSchema` - Epic + subtasks structure
+ *
+ * ## Evaluation Schemas (Agent Self-Assessment)
+ * - `EvaluationSchema` - Complete evaluation with criteria
+ * - `CriterionEvaluationSchema` - Single criterion result
+ *
+ * ## Progress Schemas (Swarm Coordination)
+ * - `SwarmStatusSchema` - Overall swarm progress
+ * - `AgentProgressSchema` - Individual agent status
+ * - `SpawnedAgentSchema` - Spawned agent metadata
+ *
+ * @module schemas
  */
 
 // Bead schemas

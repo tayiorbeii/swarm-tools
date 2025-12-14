@@ -12,9 +12,15 @@
 import { z } from "zod";
 
 /**
- * Single criterion evaluation
+ * Evaluation of a single criterion.
  *
- * Each criterion (type_safe, no_bugs, etc.) gets its own evaluation.
+ * @example
+ * // Passing criterion
+ * { passed: true, feedback: "All types validated", score: 0.95 }
+ *
+ * @example
+ * // Failing criterion
+ * { passed: false, feedback: "Missing error handling in auth flow", score: 0.3 }
  */
 export const CriterionEvaluationSchema = z.object({
   passed: z.boolean(),
@@ -31,7 +37,11 @@ export type CriterionEvaluation = z.infer<typeof CriterionEvaluationSchema>;
  */
 export const WeightedCriterionEvaluationSchema =
   CriterionEvaluationSchema.extend({
-    /** Current weight after decay (0-1, lower = less reliable) */
+    /**
+     * Current weight after 90-day half-life decay.
+     * Range: 0-1 where 1 = recent/validated, 0 = old/unreliable.
+     * Weights decay over time unless revalidated via semantic-memory_validate.
+     */
     weight: z.number().min(0).max(1).default(1),
     /** Weighted score = score * weight */
     weighted_score: z.number().min(0).max(1).optional(),

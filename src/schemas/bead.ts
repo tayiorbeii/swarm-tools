@@ -42,19 +42,42 @@ export type BeadDependency = z.infer<typeof BeadDependencySchema>;
  * - Custom subtask: `{project}-{custom-id}.{suffix}` (e.g., `migrate-egghead-phase-0.e2e-test`)
  */
 export const BeadSchema = z.object({
+  /**
+   * Bead ID format: project-slug-hash with optional subtask index.
+   *
+   * Pattern: `project-name-xxxxx` or `project-name-xxxxx.N`
+   * Examples:
+   * - `my-project-abc12` (main bead)
+   * - `my-project-abc12.1` (first subtask)
+   * - `my-project-abc12.2` (second subtask)
+   */
   id: z
     .string()
-    .regex(/^[a-z0-9]+(-[a-z0-9]+)+(\.[\w-]+)?$/, "Invalid bead ID format"),
+    .regex(
+      /^[a-z0-9]+(-[a-z0-9]+)+(\.[\w-]+)?$/,
+      "Invalid bead ID format (expected: project-slug-hash or project-slug-hash.N)",
+    ),
   title: z.string().min(1, "Title required"),
   description: z.string().optional().default(""),
   status: BeadStatusSchema.default("open"),
   priority: z.number().int().min(0).max(3).default(2),
   issue_type: BeadTypeSchema.default("task"),
-  created_at: z.string().datetime({ offset: true }), // ISO-8601 with timezone offset
-  updated_at: z.string().datetime({ offset: true }).optional(),
+  created_at: z.string().datetime({
+    offset: true,
+    message:
+      "Must be ISO-8601 datetime with timezone (e.g., 2024-01-15T10:30:00Z)",
+  }),
+  updated_at: z
+    .string()
+    .datetime({
+      offset: true,
+      message:
+        "Must be ISO-8601 datetime with timezone (e.g., 2024-01-15T10:30:00Z)",
+    })
+    .optional(),
   closed_at: z.string().datetime({ offset: true }).optional(),
   parent_id: z.string().optional(),
-  dependencies: z.array(BeadDependencySchema).optional().default([]),
+  dependencies: z.array(BeadDependencySchema).default([]),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 export type Bead = z.infer<typeof BeadSchema>;
@@ -111,6 +134,14 @@ export const SubtaskSpecSchema = z.object({
   description: z.string().optional().default(""),
   files: z.array(z.string()).default([]),
   dependencies: z.array(z.number().int().min(0)).default([]), // Indices of other subtasks
+  /**
+   * Complexity estimate on 1-5 scale:
+   * 1 = trivial (typo fix, simple rename)
+   * 2 = simple (single function change)
+   * 3 = moderate (multi-file, some coordination)
+   * 4 = complex (significant refactoring)
+   * 5 = very complex (architectural change)
+   */
   estimated_complexity: z.number().int().min(1).max(5).default(3),
 });
 export type SubtaskSpec = z.infer<typeof SubtaskSpecSchema>;
