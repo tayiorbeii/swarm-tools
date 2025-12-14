@@ -137,6 +137,27 @@ export const migrations: Migration[] = [
     `,
     down: `DROP TABLE IF EXISTS eval_records;`,
   },
+  {
+    version: 4,
+    description: "Add swarm_contexts table for context recovery",
+    up: `
+      CREATE TABLE IF NOT EXISTS swarm_contexts (
+        id TEXT PRIMARY KEY,
+        epic_id TEXT NOT NULL,
+        bead_id TEXT NOT NULL,
+        strategy TEXT NOT NULL,
+        files JSONB NOT NULL,
+        dependencies JSONB NOT NULL,
+        directives JSONB NOT NULL,
+        recovery JSONB NOT NULL,
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_swarm_contexts_epic ON swarm_contexts(epic_id);
+      CREATE INDEX IF NOT EXISTS idx_swarm_contexts_bead ON swarm_contexts(bead_id);
+    `,
+    down: `DROP TABLE IF EXISTS swarm_contexts;`,
+  },
 ];
 
 // ============================================================================

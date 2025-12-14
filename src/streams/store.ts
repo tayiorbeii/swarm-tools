@@ -544,6 +544,15 @@ async function updateMaterializedViews(
       case "human_feedback":
         await handleHumanFeedback(db, event);
         break;
+
+      // Swarm checkpoint events - update swarm_contexts table
+      case "swarm_checkpointed":
+        await handleSwarmCheckpointed(db, event);
+        break;
+
+      case "swarm_recovered":
+        await handleSwarmRecovered(db, event);
+        break;
     }
   } catch (error) {
     console.error("[SwarmMail] Failed to update materialized views", {
@@ -864,6 +873,62 @@ async function handleHumanFeedback(
       event.notes || null,
       event.timestamp,
       event.epic_id,
+    ],
+  );
+}
+
+async function handleSwarmCheckpointed(
+  db: Awaited<ReturnType<typeof getDatabase>>,
+  event: AgentEvent & { id: number; sequence: number },
+): Promise<void> {
+  if (event.type !== "swarm_checkpointed") return;
+
+  await db.query(
+    `INSERT INTO swarm_contexts (
+      project_key, epic_id, bead_id, strategy, files, dependencies, 
+      directives, recovery, checkpointed_at, updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
+    ON CONFLICT (project_key, epic_id, bead_id) DO UPDATE SET
+      strategy = EXCLUDED.strategy,
+      files = EXCLUDED.files,
+      dependencies = EXCLUDED.dependencies,
+      directives = EXCLUDED.directives,
+      recovery = EXCLUDED.recovery,
+      checkpointed_at = EXCLUDED.checkpointed_at,
+      updated_at = EXCLUDED.updated_at`,
+    [
+      event.project_key,
+      event.epic_id,
+      event.bead_id,
+      event.strategy,
+      JSON.stringify(event.files),
+      JSON.stringify(event.dependencies),
+      JSON.stringify(event.directives),
+      JSON.stringify(event.recovery),
+      event.timestamp,
+    ],
+  );
+}
+
+async function handleSwarmRecovered(
+  db: Awaited<ReturnType<typeof getDatabase>>,
+  event: AgentEvent & { id: number; sequence: number },
+): Promise<void> {
+  if (event.type !== "swarm_recovered") return;
+
+  // Update swarm_contexts to mark as recovered
+  await db.query(
+    `UPDATE swarm_contexts SET
+      recovered_at = $1,
+      recovered_from_checkpoint = $2,
+      updated_at = $1
+    WHERE project_key = $3 AND epic_id = $4 AND bead_id = $5`,
+    [
+      event.timestamp,
+      event.recovered_from_checkpoint,
+      event.project_key,
+      event.epic_id,
+      event.bead_id,
     ],
   );
 }

@@ -422,6 +422,11 @@ export function formatSubtaskPromptV2(params: {
   compressed_context?: string;
   error_context?: string;
   project_path?: string;
+  recovery_context?: {
+    shared_context?: string;
+    skills_to_load?: string[];
+    coordinator_notes?: string;
+  };
 }): string {
   const fileList =
     params.files.length > 0
@@ -434,6 +439,37 @@ export function formatSubtaskPromptV2(params: {
 
   const errorSection = params.error_context ? params.error_context : "";
 
+  // Build recovery context section
+  let recoverySection = "";
+  if (params.recovery_context) {
+    const sections: string[] = [];
+
+    if (params.recovery_context.shared_context) {
+      sections.push(
+        `### Recovery Context\n${params.recovery_context.shared_context}`,
+      );
+    }
+
+    if (
+      params.recovery_context.skills_to_load &&
+      params.recovery_context.skills_to_load.length > 0
+    ) {
+      sections.push(
+        `### Skills to Load\nBefore starting work, load these skills for specialized guidance:\n${params.recovery_context.skills_to_load.map((s) => `- skills_use(name="${s}")`).join("\n")}`,
+      );
+    }
+
+    if (params.recovery_context.coordinator_notes) {
+      sections.push(
+        `### Coordinator Notes\n${params.recovery_context.coordinator_notes}`,
+      );
+    }
+
+    if (sections.length > 0) {
+      recoverySection = `\n## [RECOVERY CONTEXT]\n\n${sections.join("\n\n")}`;
+    }
+  }
+
   return SUBTASK_PROMPT_V2.replace(/{bead_id}/g, params.bead_id)
     .replace(/{epic_id}/g, params.epic_id)
     .replace(/{project_path}/g, params.project_path || "$PWD")
@@ -445,7 +481,7 @@ export function formatSubtaskPromptV2(params: {
     .replace("{file_list}", fileList)
     .replace("{shared_context}", params.shared_context || "(none)")
     .replace("{compressed_context}", compressedSection)
-    .replace("{error_context}", errorSection);
+    .replace("{error_context}", errorSection + recoverySection);
 }
 
 /**
@@ -561,6 +597,14 @@ export const swarm_spawn_subtask = tool({
       .describe(
         "Absolute project path for swarmmail_init (REQUIRED for tracking)",
       ),
+    recovery_context: tool.schema
+      .object({
+        shared_context: tool.schema.string().optional(),
+        skills_to_load: tool.schema.array(tool.schema.string()).optional(),
+        coordinator_notes: tool.schema.string().optional(),
+      })
+      .optional()
+      .describe("Recovery context from checkpoint compaction"),
   },
   async execute(args) {
     const prompt = formatSubtaskPromptV2({
@@ -571,6 +615,7 @@ export const swarm_spawn_subtask = tool({
       files: args.files,
       shared_context: args.shared_context,
       project_path: args.project_path,
+      recovery_context: args.recovery_context,
     });
 
     return JSON.stringify(
@@ -580,6 +625,7 @@ export const swarm_spawn_subtask = tool({
         epic_id: args.epic_id,
         files: args.files,
         project_path: args.project_path,
+        recovery_context: args.recovery_context,
       },
       null,
       2,

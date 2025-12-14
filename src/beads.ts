@@ -335,6 +335,14 @@ export const beads_create_epic = tool({
       .string()
       .optional()
       .describe("Project path for event emission"),
+    recovery_context: tool.schema
+      .object({
+        shared_context: tool.schema.string().optional(),
+        skills_to_load: tool.schema.array(tool.schema.string()).optional(),
+        coordinator_notes: tool.schema.string().optional(),
+      })
+      .optional()
+      .describe("Recovery context from checkpoint compaction"),
   },
   async execute(args, ctx) {
     const validated = EpicCreateArgsSchema.parse(args);
@@ -415,6 +423,7 @@ export const beads_create_epic = tool({
               files: st.files || [],
               priority: st.priority,
             })),
+            recovery_context: args.recovery_context,
           });
           await appendEvent(event, args.project_key);
         } catch (error) {

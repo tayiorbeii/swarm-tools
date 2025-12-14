@@ -125,3 +125,21 @@ export {
   type QueryMandatesArgs,
   type ScoreCalculationResult,
 } from "./mandate";
+
+// Swarm context schemas
+export {
+  SwarmStrategySchema,
+  SwarmDirectivesSchema,
+  SwarmRecoverySchema,
+  SwarmBeadContextSchema,
+  CreateSwarmContextArgsSchema,
+  UpdateSwarmContextArgsSchema,
+  QuerySwarmContextsArgsSchema,
+  type SwarmStrategy,
+  type SwarmDirectives,
+  type SwarmRecovery,
+  type SwarmBeadContext,
+  type CreateSwarmContextArgs,
+  type UpdateSwarmContextArgs,
+  type QuerySwarmContextsArgs,
+} from "./swarm-context";

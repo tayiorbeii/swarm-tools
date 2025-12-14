@@ -839,7 +839,74 @@ export const swarm_progress = tool({
       importance: args.status === "blocked" ? "high" : "normal",
     });
 
-    return `Progress reported: ${args.status}${args.progress_percent !== undefined ? ` (${args.progress_percent}%)` : ""}`;
+    // Auto-checkpoint at milestone progress (25%, 50%, 75%)
+    let checkpointCreated = false;
+    if (
+      args.progress_percent !== undefined &&
+      args.files_touched &&
+      args.files_touched.length > 0
+    ) {
+      const milestones = [25, 50, 75];
+      if (milestones.includes(args.progress_percent)) {
+        try {
+          // Create checkpoint event directly (non-fatal if it fails)
+          const checkpoint = {
+            epic_id: epicId,
+            bead_id: args.bead_id,
+            strategy: "file-based" as const,
+            files: args.files_touched,
+            dependencies: [] as string[],
+            directives: {},
+            recovery: {
+              last_checkpoint: Date.now(),
+              files_modified: args.files_touched,
+              progress_percent: args.progress_percent,
+              last_message: args.message,
+            },
+          };
+
+          const event = createEvent("swarm_checkpointed", {
+            project_key: args.project_key,
+            ...checkpoint,
+          });
+          await appendEvent(event, args.project_key);
+
+          // Update swarm_contexts table
+          const { getDatabase } = await import("./streams/index");
+          const db = await getDatabase(args.project_key);
+          const now = Date.now();
+          await db.query(
+            `INSERT INTO swarm_contexts (id, epic_id, bead_id, strategy, files, dependencies, directives, recovery, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             ON CONFLICT (id) DO UPDATE SET
+               files = EXCLUDED.files,
+               recovery = EXCLUDED.recovery,
+               updated_at = EXCLUDED.updated_at`,
+            [
+              args.bead_id,
+              epicId,
+              args.bead_id,
+              checkpoint.strategy,
+              JSON.stringify(checkpoint.files),
+              JSON.stringify(checkpoint.dependencies),
+              JSON.stringify(checkpoint.directives),
+              JSON.stringify(checkpoint.recovery),
+              now,
+              now,
+            ],
+          );
+          checkpointCreated = true;
+        } catch (error) {
+          // Non-fatal - log and continue
+          console.warn(
+            `[swarm_progress] Auto-checkpoint failed at ${args.progress_percent}%:`,
+            error,
+          );
+        }
+      }
+    }
+
+    return `Progress reported: ${args.status}${args.progress_percent !== undefined ? ` (${args.progress_percent}%)` : ""}${checkpointCreated ? " [checkpoint created]" : ""}`;
   },
 });
 
@@ -1739,6 +1806,275 @@ export const swarm_check_strikes = tool({
 });
 
 /**
+ * Swarm context shape stored in swarm_contexts table
+ */
+interface SwarmBeadContext {
+  id: string;
+  epic_id: string;
+  bead_id: string;
+  strategy: "file-based" | "feature-based" | "risk-based";
+  files: string[];
+  dependencies: string[];
+  directives: {
+    shared_context?: string;
+    skills_to_load?: string[];
+    coordinator_notes?: string;
+  };
+  recovery: {
+    last_checkpoint: number;
+    files_modified: string[];
+    progress_percent: number;
+    last_message?: string;
+    error_context?: string;
+  };
+  created_at: number;
+  updated_at: number;
+}
+
+/**
+ * Checkpoint swarm context for recovery
+ *
+ * Records the current state of a subtask to enable recovery after crashes,
+ * context overflows, or agent restarts. Non-fatal errors - logs warnings
+ * and continues if checkpoint fails.
+ *
+ * Integration:
+ * - Called automatically by swarm_progress at milestone thresholds (25%, 50%, 75%)
+ * - Can be called manually by agents at critical points
+ * - Emits SwarmCheckpointedEvent for audit trail
+ * - Updates swarm_contexts table for fast recovery queries
+ */
+export const swarm_checkpoint = tool({
+  description:
+    "Checkpoint swarm context for recovery. Records current state for crash recovery. Non-fatal errors.",
+  args: {
+    project_key: tool.schema.string().describe("Project path"),
+    agent_name: tool.schema.string().describe("Agent name"),
+    bead_id: tool.schema.string().describe("Subtask bead ID"),
+    epic_id: tool.schema.string().describe("Epic bead ID"),
+    files_modified: tool.schema
+      .array(tool.schema.string())
+      .describe("Files modified so far"),
+    progress_percent: tool.schema
+      .number()
+      .min(0)
+      .max(100)
+      .describe("Current progress"),
+    directives: tool.schema
+      .object({
+        shared_context: tool.schema.string().optional(),
+        skills_to_load: tool.schema.array(tool.schema.string()).optional(),
+        coordinator_notes: tool.schema.string().optional(),
+      })
+      .optional()
+      .describe("Coordinator directives for this subtask"),
+    error_context: tool.schema
+      .string()
+      .optional()
+      .describe("Error context if checkpoint is during error handling"),
+  },
+  async execute(args) {
+    try {
+      // Build checkpoint data
+      const checkpoint: Omit<
+        SwarmBeadContext,
+        "id" | "created_at" | "updated_at"
+      > = {
+        epic_id: args.epic_id,
+        bead_id: args.bead_id,
+        strategy: "file-based", // TODO: Extract from decomposition metadata
+        files: args.files_modified,
+        dependencies: [], // TODO: Extract from bead metadata
+        directives: args.directives || {},
+        recovery: {
+          last_checkpoint: Date.now(),
+          files_modified: args.files_modified,
+          progress_percent: args.progress_percent,
+          error_context: args.error_context,
+        },
+      };
+
+      // Emit checkpoint event
+      const event = createEvent("swarm_checkpointed", {
+        project_key: args.project_key,
+        epic_id: args.epic_id,
+        bead_id: args.bead_id,
+        strategy: checkpoint.strategy,
+        files: checkpoint.files,
+        dependencies: checkpoint.dependencies,
+        directives: checkpoint.directives,
+        recovery: checkpoint.recovery,
+      });
+
+      await appendEvent(event, args.project_key);
+
+      // Update swarm_contexts table for fast recovery
+      const { getDatabase } = await import("./streams/index");
+      const db = await getDatabase(args.project_key);
+
+      const now = Date.now();
+      await db.query(
+        `INSERT INTO swarm_contexts (id, epic_id, bead_id, strategy, files, dependencies, directives, recovery, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         ON CONFLICT (id) DO UPDATE SET
+           files = EXCLUDED.files,
+           recovery = EXCLUDED.recovery,
+           updated_at = EXCLUDED.updated_at`,
+        [
+          args.bead_id, // Use bead_id as unique ID
+          args.epic_id,
+          args.bead_id,
+          checkpoint.strategy,
+          JSON.stringify(checkpoint.files),
+          JSON.stringify(checkpoint.dependencies),
+          JSON.stringify(checkpoint.directives),
+          JSON.stringify(checkpoint.recovery),
+          now,
+          now,
+        ],
+      );
+
+      return JSON.stringify(
+        {
+          success: true,
+          checkpoint_timestamp: now,
+          summary: `Checkpoint saved for ${args.bead_id} at ${args.progress_percent}%`,
+          bead_id: args.bead_id,
+          epic_id: args.epic_id,
+          files_tracked: args.files_modified.length,
+        },
+        null,
+        2,
+      );
+    } catch (error) {
+      // Non-fatal - log warning and continue
+      console.warn(
+        `[swarm_checkpoint] Failed to checkpoint ${args.bead_id}:`,
+        error,
+      );
+      return JSON.stringify(
+        {
+          success: false,
+          warning: "Checkpoint failed but continuing",
+          error: error instanceof Error ? error.message : String(error),
+          bead_id: args.bead_id,
+          note: "This is non-fatal. Work can continue without checkpoint.",
+        },
+        null,
+        2,
+      );
+    }
+  },
+});
+
+/**
+ * Recover swarm context from last checkpoint
+ *
+ * Queries swarm_contexts table for the most recent checkpoint of an epic.
+ * Returns the full context including files, progress, and recovery state.
+ * Emits SwarmRecoveredEvent for audit trail.
+ *
+ * Graceful fallback: Returns { found: false } if no checkpoint exists.
+ */
+export const swarm_recover = tool({
+  description:
+    "Recover swarm context from last checkpoint. Returns context or null if not found.",
+  args: {
+    project_key: tool.schema.string().describe("Project path"),
+    epic_id: tool.schema.string().describe("Epic bead ID to recover"),
+  },
+  async execute(args) {
+    try {
+      const { getDatabase } = await import("./streams/index");
+      const db = await getDatabase(args.project_key);
+
+      // Query most recent checkpoint for this epic
+      const result = await db.query<{
+        id: string;
+        epic_id: string;
+        bead_id: string;
+        strategy: string;
+        files: string;
+        dependencies: string;
+        directives: string;
+        recovery: string;
+        created_at: number;
+        updated_at: number;
+      }>(
+        `SELECT * FROM swarm_contexts 
+         WHERE epic_id = $1 
+         ORDER BY updated_at DESC 
+         LIMIT 1`,
+        [args.epic_id],
+      );
+
+      if (result.rows.length === 0) {
+        return JSON.stringify(
+          {
+            found: false,
+            message: `No checkpoint found for epic ${args.epic_id}`,
+            epic_id: args.epic_id,
+          },
+          null,
+          2,
+        );
+      }
+
+      const row = result.rows[0];
+      const context: SwarmBeadContext = {
+        id: row.id,
+        epic_id: row.epic_id,
+        bead_id: row.bead_id,
+        strategy: row.strategy as SwarmBeadContext["strategy"],
+        files: JSON.parse(row.files),
+        dependencies: JSON.parse(row.dependencies),
+        directives: JSON.parse(row.directives),
+        recovery: JSON.parse(row.recovery),
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      };
+
+      // Emit recovery event
+      const event = createEvent("swarm_recovered", {
+        project_key: args.project_key,
+        epic_id: args.epic_id,
+        bead_id: context.bead_id,
+        recovered_from_checkpoint: context.recovery.last_checkpoint,
+      });
+
+      await appendEvent(event, args.project_key);
+
+      return JSON.stringify(
+        {
+          found: true,
+          context,
+          summary: `Recovered checkpoint from ${new Date(context.updated_at).toISOString()}`,
+          age_seconds: Math.round((Date.now() - context.updated_at) / 1000),
+        },
+        null,
+        2,
+      );
+    } catch (error) {
+      // Graceful fallback
+      console.warn(
+        `[swarm_recover] Failed to recover context for ${args.epic_id}:`,
+        error,
+      );
+      return JSON.stringify(
+        {
+          found: false,
+          error: error instanceof Error ? error.message : String(error),
+          message: `Recovery failed for epic ${args.epic_id}`,
+          epic_id: args.epic_id,
+        },
+        null,
+        2,
+      );
+    }
+  },
+});
+
+/**
  * Learn from completed work and optionally create a skill
  *
  * This tool helps agents reflect on patterns, best practices, or domain
@@ -1956,5 +2292,7 @@ export const orchestrateTools = {
   swarm_get_error_context,
   swarm_resolve_error,
   swarm_check_strikes,
+  swarm_checkpoint,
+  swarm_recover,
   swarm_learn,
 };

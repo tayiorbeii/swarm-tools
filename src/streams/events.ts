@@ -159,6 +159,13 @@ export const DecompositionGeneratedEventSchema = BaseEventSchema.extend({
       priority: z.number().min(0).max(3).optional(),
     }),
   ),
+  recovery_context: z
+    .object({
+      shared_context: z.string().optional(),
+      skills_to_load: z.array(z.string()).optional(),
+      coordinator_notes: z.string().optional(),
+    })
+    .optional(),
 });
 
 export const SubtaskOutcomeEventSchema = BaseEventSchema.extend({
@@ -182,6 +189,38 @@ export const HumanFeedbackEventSchema = BaseEventSchema.extend({
 });
 
 // ============================================================================
+// Swarm Checkpoint Events (for recovery and coordination)
+// ============================================================================
+
+export const SwarmCheckpointedEventSchema = BaseEventSchema.extend({
+  type: z.literal("swarm_checkpointed"),
+  epic_id: z.string(),
+  bead_id: z.string(),
+  strategy: z.enum(["file-based", "feature-based", "risk-based"]),
+  files: z.array(z.string()),
+  dependencies: z.array(z.string()),
+  directives: z.object({
+    shared_context: z.string().optional(),
+    skills_to_load: z.array(z.string()).optional(),
+    coordinator_notes: z.string().optional(),
+  }),
+  recovery: z.object({
+    last_checkpoint: z.number(),
+    files_modified: z.array(z.string()),
+    progress_percent: z.number().min(0).max(100),
+    last_message: z.string().optional(),
+    error_context: z.string().optional(),
+  }),
+});
+
+export const SwarmRecoveredEventSchema = BaseEventSchema.extend({
+  type: z.literal("swarm_recovered"),
+  epic_id: z.string(),
+  bead_id: z.string(),
+  recovered_from_checkpoint: z.number(), // timestamp
+});
+
+// ============================================================================
 // Union Type
 // ============================================================================
 
@@ -200,6 +239,8 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   DecompositionGeneratedEventSchema,
   SubtaskOutcomeEventSchema,
   HumanFeedbackEventSchema,
+  SwarmCheckpointedEventSchema,
+  SwarmRecoveredEventSchema,
 ]);
 
 export type AgentEvent = z.infer<typeof AgentEventSchema>;
@@ -221,6 +262,10 @@ export type DecompositionGeneratedEvent = z.infer<
 >;
 export type SubtaskOutcomeEvent = z.infer<typeof SubtaskOutcomeEventSchema>;
 export type HumanFeedbackEvent = z.infer<typeof HumanFeedbackEventSchema>;
+export type SwarmCheckpointedEvent = z.infer<
+  typeof SwarmCheckpointedEventSchema
+>;
+export type SwarmRecoveredEvent = z.infer<typeof SwarmRecoveredEventSchema>;
 
 // ============================================================================
 // Session State Types
