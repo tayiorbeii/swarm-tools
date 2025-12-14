@@ -75,9 +75,11 @@ export type DefaultCriterion = (typeof DEFAULT_CRITERIA)[number];
  * Evaluation request arguments
  */
 export const EvaluationRequestSchema = z.object({
-  subtask_id: z.string(),
-  criteria: z.array(z.string()).default([...DEFAULT_CRITERIA]),
-  context: z.string().optional(),
+  bead_id: z.string(),
+  subtask_title: z.string(),
+  files_touched: z.array(z.string()),
+  /** ISO-8601 timestamp when evaluation was requested */
+  requested_at: z.string().datetime().optional(),
 });
 export type EvaluationRequest = z.infer<typeof EvaluationRequestSchema>;
 

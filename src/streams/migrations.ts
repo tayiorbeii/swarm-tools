@@ -1,9 +1,44 @@
 /**
- * Schema Migration System for PGLite Event Store
+ * Schema Migration System
  *
- * Version-based migrations with up/down support.
- * Tracks applied migrations in schema_version table.
- * Idempotent - safe to run multiple times.
+ * Handles database schema evolution for the PGLite event store.
+ *
+ * ## How It Works
+ *
+ * 1. Each migration has a unique version number (incrementing integer)
+ * 2. On startup, `runMigrations()` checks current schema version
+ * 3. Migrations are applied in order until schema is current
+ * 4. Version is stored in `schema_version` table
+ *
+ * ## Adding a New Migration
+ *
+ * ```typescript
+ * // In migrations.ts
+ * export const migrations: Migration[] = [
+ *   // ... existing migrations
+ *   {
+ *     version: 3,
+ *     description: "add_new_column",
+ *     up: `ALTER TABLE events ADD COLUMN new_col TEXT`,
+ *     down: `ALTER TABLE events DROP COLUMN new_col`,
+ *   },
+ * ];
+ * ```
+ *
+ * ## Rollback
+ *
+ * Rollback is supported via `rollbackTo(db, targetVersion)`.
+ * Note: Some migrations may not be fully reversible (data loss).
+ *
+ * ## Best Practices
+ *
+ * - Always test migrations on a copy of production data
+ * - Keep migrations small and focused
+ * - Include both `up` and `down` SQL
+ * - Use transactions for multi-statement migrations
+ * - Document any data transformations
+ *
+ * @module migrations
  */
 import type { PGlite } from "@electric-sql/pglite";
 
@@ -11,10 +46,17 @@ import type { PGlite } from "@electric-sql/pglite";
 // Types
 // ============================================================================
 
+/**
+ * A database migration definition.
+ */
 export interface Migration {
+  /** Unique version number (must be sequential) */
   version: number;
+  /** Human-readable migration description */
   description: string;
+  /** SQL to apply the migration */
   up: string;
+  /** SQL to rollback the migration (best effort) */
   down: string;
 }
 

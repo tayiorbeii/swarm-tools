@@ -1,14 +1,17 @@
 /**
- * Structured Output Module - Validate and parse agent responses
+ * Structured Output Module - JSON extraction and schema validation
  *
- * Agents frequently return malformed JSON, especially when streaming
- * or under high load. This module provides robust extraction and
- * validation with detailed error feedback for retry loops.
+ * Handles parsing agent responses that contain JSON, with multiple fallback
+ * strategies for malformed or wrapped content.
  *
- * Key patterns:
- * - Multiple JSON extraction strategies (direct, code blocks, brace matching)
- * - Zod schema validation with formatted error messages
- * - Structured error types for programmatic handling
+ * ## Usage
+ * 1. `structured_extract_json` - Raw JSON extraction from text (no validation)
+ * 2. `structured_validate` - Extract + validate against named schema
+ * 3. `structured_parse_evaluation` - Typed parsing for agent self-evaluations
+ * 4. `structured_parse_decomposition` - Typed parsing for task breakdowns
+ * 5. `structured_parse_bead_tree` - Typed parsing for epic + subtasks
+ *
+ * @module structured
  */
 import { tool } from "@opencode-ai/plugin";
 import { z, type ZodSchema } from "zod";
@@ -17,6 +20,7 @@ import {
   TaskDecompositionSchema,
   BeadTreeSchema,
   ValidationResultSchema,
+  CriterionEvaluationSchema,
   type Evaluation,
   type TaskDecomposition,
   type BeadTree,
@@ -109,11 +113,18 @@ function getSchemaByName(name: string): ZodSchema {
 }
 
 /**
- * Try to extract JSON from text using multiple strategies
+ * Extract JSON from text using multiple strategies.
  *
- * @param text - Raw text that may contain JSON
- * @returns Tuple of [parsed object, extraction method used]
- * @throws JsonExtractionError if no JSON can be extracted
+ * Strategies tried in priority order:
+ * 1. Direct parse - fastest, works for clean JSON
+ * 2. JSON code block - common in markdown responses
+ * 3. Generic code block - fallback for unlabeled blocks
+ * 4. First brace match - finds outermost {...}
+ * 5. Last brace match - handles trailing content
+ * 6. Repair attempt - fixes common issues (quotes, trailing commas)
+ *
+ * @param text Raw text potentially containing JSON
+ * @returns Parsed JSON object or null if all strategies fail
  */
 function extractJsonFromText(text: string): [unknown, string] {
   const trimmed = text.trim();
@@ -189,6 +200,9 @@ function extractJsonFromText(text: string): [unknown, string] {
   );
 }
 
+/** Maximum nesting depth before aborting (prevents stack overflow on malformed input) */
+const MAX_BRACE_DEPTH = 100;
+
 /**
  * Find a balanced pair of braces/brackets
  */
@@ -226,8 +240,14 @@ function findBalancedBraces(
 
     if (char === open) {
       depth++;
+      if (depth > MAX_BRACE_DEPTH) {
+        return null; // Malformed input - too deeply nested
+      }
     } else if (char === close) {
       depth--;
+      if (depth < 0) {
+        return null; // Malformed input - unbalanced braces
+      }
       if (depth === 0) {
         return text.slice(startIdx, i + 1);
       }
@@ -238,13 +258,18 @@ function findBalancedBraces(
 }
 
 /**
- * Attempt common JSON repairs
+ * Attempt to repair common JSON issues.
  *
- * Handles:
- * - Trailing commas
- * - Single quotes instead of double quotes
- * - Unquoted keys
- * - Newlines in strings
+ * This is a simple heuristic - won't work for all cases.
+ *
+ * **Known Limitations:**
+ * - Single quotes in nested objects may not be handled correctly
+ * - Escaped quotes in keys can confuse the regex
+ * - Multiline strings are not detected
+ * - Trailing commas in nested arrays may be missed
+ *
+ * @param text Potentially malformed JSON string
+ * @returns Repaired JSON string (may still be invalid)
  */
 function attemptJsonRepair(text: string): string {
   let repaired = text;
@@ -274,6 +299,9 @@ function attemptJsonRepair(text: string): string {
 // ============================================================================
 // Validation Result Types
 // ============================================================================
+
+/** Maximum characters to show in raw input previews */
+const RAW_INPUT_PREVIEW_LENGTH = 200;
 
 /**
  * Result of a structured validation attempt
@@ -326,7 +354,7 @@ export const structured_extract_json = tool({
             success: false,
             error: error.message,
             attempted_strategies: error.attemptedStrategies,
-            raw_input_preview: args.text.slice(0, 200),
+            raw_input_preview: args.text.slice(0, RAW_INPUT_PREVIEW_LENGTH),
           },
           null,
           2,
@@ -350,7 +378,12 @@ export const structured_validate = tool({
     response: tool.schema.string().describe("Agent response to validate"),
     schema_name: tool.schema
       .enum(["evaluation", "task_decomposition", "bead_tree"])
-      .describe("Schema to validate against"),
+      .describe(
+        "Schema to validate against: " +
+          "evaluation = agent self-eval with criteria, " +
+          "task_decomposition = swarm task breakdown, " +
+          "bead_tree = epic with subtasks",
+      ),
     max_retries: tool.schema
       .number()
       .min(1)
@@ -366,6 +399,15 @@ export const structured_validate = tool({
       errors: [],
     };
 
+    // Check for empty response before attempting extraction
+    if (!args.response || args.response.trim().length === 0) {
+      return JSON.stringify({
+        valid: false,
+        error: "Response is empty or contains only whitespace",
+        raw_input: "(empty)",
+      });
+    }
+
     // Step 1: Extract JSON
     let extracted: unknown;
     let extractionMethod: string;
@@ -377,7 +419,7 @@ export const structured_validate = tool({
       if (error instanceof JsonExtractionError) {
         result.errors = [
           `JSON extraction failed after trying: ${error.attemptedStrategies.join(", ")}`,
-          `Input preview: ${args.response.slice(0, 100)}...`,
+          `Input preview: ${args.response.slice(0, RAW_INPUT_PREVIEW_LENGTH)}...`,
         ];
         return JSON.stringify(result, null, 2);
       }
@@ -441,7 +483,12 @@ export const structured_parse_evaluation = tool({
             passed: validated.passed,
             criteria_count: Object.keys(validated.criteria).length,
             failed_criteria: Object.entries(validated.criteria)
-              .filter(([_, v]) => !(v as { passed: boolean }).passed)
+              .filter(([_, v]) => {
+                const criterion = v as z.infer<
+                  typeof CriterionEvaluationSchema
+                >;
+                return !criterion.passed;
+              })
               .map(([k]) => k),
           },
         },
@@ -700,9 +747,9 @@ export { extractJsonFromText, formatZodErrors, getSchemaByName };
 // ============================================================================
 
 export const structuredTools = {
-  "structured_extract_json": structured_extract_json,
-  "structured_validate": structured_validate,
-  "structured_parse_evaluation": structured_parse_evaluation,
-  "structured_parse_decomposition": structured_parse_decomposition,
-  "structured_parse_bead_tree": structured_parse_bead_tree,
+  structured_extract_json: structured_extract_json,
+  structured_validate: structured_validate,
+  structured_parse_evaluation: structured_parse_evaluation,
+  structured_parse_decomposition: structured_parse_decomposition,
+  structured_parse_bead_tree: structured_parse_bead_tree,
 };
