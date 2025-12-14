@@ -19,7 +19,7 @@ importers:
         version: 0.3.14
       '@opencode-ai/plugin':
         specifier: ^1.0.134
-        version: 1.0.134
+        version: 1.0.152
       effect:
         specifier: ^3.19.12
         version: 3.19.12
@@ -32,6 +32,9 @@ importers:
       minimatch:
         specifier: ^10.1.1
         version: 10.1.1
+      nanoid:
+        specifier: ^5.1.6
+        version: 5.1.6
       zod:
         specifier: 4.1.8
         version: 4.1.8
@@ -42,17 +45,49 @@ importers:
       '@types/minimatch':
         specifier: ^6.0.0
         version: 6.0.0
+      ai:
+        specifier: 6.0.0-beta.150
+        version: 6.0.0-beta.150(effect@3.19.12)(zod@4.1.8)
+      bun-types:
+        specifier: ^1.3.4
+        version: 1.3.4
       evalite:
         specifier: ^1.0.0-beta.10
-        version: 1.0.0-beta.15
+        version: 1.0.0-beta.15(ai@6.0.0-beta.150(effect@3.19.12)(zod@4.1.8))
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
       vitest:
         specifier: ^4.0.15
-        version: 4.0.15(@types/node@24.10.1)(jiti@2.6.1)
+        version: 4.0.15(@opentelemetry/api@1.9.0)(@types/node@25.0.2)(jiti@2.6.1)
 
 packages:
+
+  '@ai-sdk/gateway@2.0.0-beta.78':
+    resolution: {integrity: sha512-uxrHKxNKWHmT++OJozwZ4FYa6jXZuJDcT1NRN9b7iQYy9MbRV6YuqDoQKIj8x3DltV0Ueg81UHZGKOSC+wwkXg==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/provider-utils@4.0.0-beta.47':
+    resolution: {integrity: sha512-nTR25V0+M/TGRegVXdhaCPqy6iaJfiyvhwtZ3ZDKhHmSVQXuwUb8zSXCPhEtpNgWXzWP3XNZvlzzgIHqByi6aw==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@valibot/to-json-schema': ^1.3.0
+      arktype: ^2.1.22
+      effect: ^3.18.4
+      zod: ^3.25.76 || ^4.1.8
+    peerDependenciesMeta:
+      '@valibot/to-json-schema':
+        optional: true
+      arktype:
+        optional: true
+      effect:
+        optional: true
+
+  '@ai-sdk/provider@3.0.0-beta.26':
+    resolution: {integrity: sha512-UQyOlrpahFL1CZ/QA0ZpFhAkE32fw1XXBx+6gu23YWSCMJCjaf/fiJUPV7xUhp/nXqVO/IC+PIIfLomx55D16A==}
+    engines: {node: '>=18'}
 
   '@borewit/text-codec@0.1.1':
     resolution: {integrity: sha512-5L/uBxmjaCIX5h8Z+uu+kA9BQLkc/Wl06UGR5ajNRxu+/XjonB5i8JpgFMrPj3LXTCPA0pv8yxUvbUi+QthGGA==}
@@ -280,11 +315,15 @@ packages:
     resolution: {integrity: sha512-9I2Zn6+NJLfaGoz9jN3lpwDgAYvfGeNYdbAIjJOqzs4Tpc+VU3Jqq4IofSUBKajiDS8k9fZIg18/z13mpk1bsA==}
     engines: {node: '>=8'}
 
-  '@opencode-ai/plugin@1.0.134':
-    resolution: {integrity: sha512-W5305/s7nVOtM4ha+qZ3iafY2h52D4zvPSylzq/ge0VVxowB/Ge1Tu+3mMUcwnoEcOOwGok7267SP9+4ulaK2w==}
+  '@opencode-ai/plugin@1.0.152':
+    resolution: {integrity: sha512-P8ov9iUOaonO1yWKnArYrIOcyzncFgIP0oDn3KTWbIM0viVA0lUf64GIwLuKcDd6W9m9ZgFcB06RzEKDnZHNjA==}
 
-  '@opencode-ai/sdk@1.0.134':
-    resolution: {integrity: sha512-9dc75GjcKQBikfCKVdxGKe1dlaatnSzdOl0FsxcGyY32vbO8y071D7IUZdcwlaI/OaS5ztgRot++Y3l7suu34A==}
+  '@opencode-ai/sdk@1.0.152':
+    resolution: {integrity: sha512-0m0Z8QFg98DMEt24PWOJZBrdUhKCHBYo5AHsCIrMkrH4jfl9V8zsN2upp1mWw+waREDEnFtQwdLA56oIS8gngQ==}
+
+  '@opentelemetry/api@1.9.0':
+    resolution: {integrity: sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==}
+    engines: {node: '>=8.0.0'}
 
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
@@ -431,8 +470,12 @@ packages:
     resolution: {integrity: sha512-zmPitbQ8+6zNutpwgcQuLcsEpn/Cj54Kbn7L5pX0Os5kdWplB7xPgEh/g+SWOB/qmows2gpuCaPyduq8ZZRnxA==}
     deprecated: This is a stub types definition. minimatch provides its own type definitions, so you do not need this installed.
 
-  '@types/node@24.10.1':
-    resolution: {integrity: sha512-GNWcUTRBgIRJD5zj+Tq0fKOJ5XZajIiBroOF0yvj2bSU1WvNdYS/dn9UxwsujGW4JX06dnHyjV2y9rRaybH0iQ==}
+  '@types/node@25.0.2':
+    resolution: {integrity: sha512-gWEkeiyYE4vqjON/+Obqcoeffmk0NF15WSBwSs7zwVA2bAbTaE0SJ7P0WNGoJn8uE7fiaV5a7dKYIJriEqOrmA==}
+
+  '@vercel/oidc@3.0.5':
+    resolution: {integrity: sha512-fnYhv671l+eTTp48gB4zEsTW/YtRgRPnkI2nT7x6qw5rkI1Lq2hTmQIpHPgyThI0znLK+vX2n9XxKdXZ7BUbbw==}
+    engines: {node: '>= 20'}
 
   '@vitest/expect@4.0.15':
     resolution: {integrity: sha512-Gfyva9/GxPAWXIWjyGDli9O+waHDC0Q0jaLdFP1qPAUUfo1FEXPXUfUkp3eZA0sSq340vPycSyOlYUeM15Ft1w==}
@@ -465,6 +508,12 @@ packages:
 
   abstract-logging@2.0.1:
     resolution: {integrity: sha512-2BjRTZxTPvheOvGbBslFSYOUkr+SjPtOnrLP33f+VIWLzezQpZcqVg7ja3L4dBXmzzgwT+a029jRx5PCi3JuiA==}
+
+  ai@6.0.0-beta.150:
+    resolution: {integrity: sha512-gBCzE2/m5w1ybx0bnWKf66ppCH+921jGFeGUTQv3+GWaaB1WLeaOa8H4sEmdx29YAZ5n+iqZKh+L5swhNSCIRg==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
 
   ajv-formats@3.0.1:
     resolution: {integrity: sha512-8iUql50EUR+uUcdRQ3HDqa6EVyo3docL8g5WJ3FNcWmu62IbkGUue/pEyLBW8VGKKucTPgqeks4fIU1DA4yowQ==}
@@ -615,8 +664,12 @@ packages:
       better-sqlite3:
         optional: true
 
-  expect-type@1.2.2:
-    resolution: {integrity: sha512-JhFGDVJ7tmDJItKhYgJCGLOWjuK9vPxiXoUFLwLDc99NlmklilbiQJwoctZtt13+xMw91MCk/REan6MWHqDjyA==}
+  eventsource-parser@3.0.6:
+    resolution: {integrity: sha512-Vo1ab+QXPzZ4tCa8SwIHJFaSzy4R6SHf7BY79rFBDf0idraZWAkYrDjDj8uWaSm3S2TK+hJ7/t1CEmZ7jXw+pg==}
+    engines: {node: '>=18.0.0'}
+
+  expect-type@1.3.0:
+    resolution: {integrity: sha512-knvyeauYhqjOYvQ66MznSMs83wmHrCycNEN6Ao+2AeYEfxUIkuiVxdEa1qlGEPK+We3n0THiDciYSsCcgW/DoA==}
     engines: {node: '>=12.0.0'}
 
   extend-shallow@2.0.1:
@@ -749,6 +802,9 @@ packages:
   json-schema-traverse@1.0.0:
     resolution: {integrity: sha512-NM8/P9n3XjXhIZn1lLhkFaACTOURQXjWhV4BA/RnOv8xvgqtqpAX9IO4mRQxSx1Rlo4tqzeqb0sOlruaOy3dug==}
 
+  json-schema@0.4.0:
+    resolution: {integrity: sha512-es94M3nTIfsEPisRafak+HDLfHXnKBhV3vU5eqPcS3flIWqcxJWgXHXiey3YrpaNsanY5ei1VoYEbOzijuq9BA==}
+
   kind-of@6.0.3:
     resolution: {integrity: sha512-dcS1ul+9tmeD95T+x28/ehLgd9mENa3LsvDTtzm3vyBEO7RPptvAD+t44WVXaUjTBRcrpFeFlC8WCruUR456hw==}
     engines: {node: '>=0.10.0'}
@@ -791,6 +847,11 @@ packages:
   nanoid@3.3.11:
     resolution: {integrity: sha512-N8SpfPUnUp1bK+PMYW8qSWdl9U+wwNWI4QKxOYDy9JAro3WMX7p2OeVRF9v+347pnakNevPmiHhNmZ2HbFA76w==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
+    hasBin: true
+
+  nanoid@5.1.6:
+    resolution: {integrity: sha512-c7+7RQ+dMB5dPwwCp4ee1/iV/q2P6aK1mTZcfr1BTuVlyW9hJYiMPybJCcnBlQtuSmTIWNeazm/zqNoZSSElBg==}
+    engines: {node: ^18 || >=20}
     hasBin: true
 
   obug@2.1.1:
@@ -1158,6 +1219,30 @@ packages:
 
 snapshots:
 
+  '@ai-sdk/gateway@2.0.0-beta.78(effect@3.19.12)(zod@4.1.8)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.0-beta.26
+      '@ai-sdk/provider-utils': 4.0.0-beta.47(effect@3.19.12)(zod@4.1.8)
+      '@vercel/oidc': 3.0.5
+      zod: 4.1.8
+    transitivePeerDependencies:
+      - '@valibot/to-json-schema'
+      - arktype
+      - effect
+
+  '@ai-sdk/provider-utils@4.0.0-beta.47(effect@3.19.12)(zod@4.1.8)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.0-beta.26
+      '@standard-schema/spec': 1.0.0
+      eventsource-parser: 3.0.6
+      zod: 4.1.8
+    optionalDependencies:
+      effect: 3.19.12
+
+  '@ai-sdk/provider@3.0.0-beta.26':
+    dependencies:
+      json-schema: 0.4.0
+
   '@borewit/text-codec@0.1.1': {}
 
   '@clack/core@0.5.0':
@@ -1328,12 +1413,14 @@ snapshots:
 
   '@lukeed/ms@2.0.2': {}
 
-  '@opencode-ai/plugin@1.0.134':
+  '@opencode-ai/plugin@1.0.152':
     dependencies:
-      '@opencode-ai/sdk': 1.0.134
+      '@opencode-ai/sdk': 1.0.152
       zod: 4.1.8
 
-  '@opencode-ai/sdk@1.0.134': {}
+  '@opencode-ai/sdk@1.0.152': {}
+
+  '@opentelemetry/api@1.9.0': {}
 
   '@pinojs/redact@0.4.0': {}
 
@@ -1432,9 +1519,11 @@ snapshots:
     dependencies:
       minimatch: 10.1.1
 
-  '@types/node@24.10.1':
+  '@types/node@25.0.2':
     dependencies:
       undici-types: 7.16.0
+
+  '@vercel/oidc@3.0.5': {}
 
   '@vitest/expect@4.0.15':
     dependencies:
@@ -1445,13 +1534,13 @@ snapshots:
       chai: 6.2.1
       tinyrainbow: 3.0.3
 
-  '@vitest/mocker@4.0.15(vite@7.2.7(@types/node@24.10.1)(jiti@2.6.1))':
+  '@vitest/mocker@4.0.15(vite@7.2.7(@types/node@25.0.2)(jiti@2.6.1))':
     dependencies:
       '@vitest/spy': 4.0.15
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 7.2.7(@types/node@24.10.1)(jiti@2.6.1)
+      vite: 7.2.7(@types/node@25.0.2)(jiti@2.6.1)
 
   '@vitest/pretty-format@4.0.15':
     dependencies:
@@ -1476,6 +1565,18 @@ snapshots:
       tinyrainbow: 3.0.3
 
   abstract-logging@2.0.1: {}
+
+  ai@6.0.0-beta.150(effect@3.19.12)(zod@4.1.8):
+    dependencies:
+      '@ai-sdk/gateway': 2.0.0-beta.78(effect@3.19.12)(zod@4.1.8)
+      '@ai-sdk/provider': 3.0.0-beta.26
+      '@ai-sdk/provider-utils': 4.0.0-beta.47(effect@3.19.12)(zod@4.1.8)
+      '@opentelemetry/api': 1.9.0
+      zod: 4.1.8
+    transitivePeerDependencies:
+      - '@valibot/to-json-schema'
+      - arktype
+      - effect
 
   ajv-formats@3.0.1(ajv@8.17.1):
     optionalDependencies:
@@ -1515,7 +1616,7 @@ snapshots:
 
   bun-types@1.3.4:
     dependencies:
-      '@types/node': 24.10.1
+      '@types/node': 25.0.2
 
   chai@6.2.1: {}
 
@@ -1612,7 +1713,7 @@ snapshots:
     dependencies:
       '@types/estree': 1.0.8
 
-  evalite@1.0.0-beta.15:
+  evalite@1.0.0-beta.15(ai@6.0.0-beta.150(effect@3.19.12)(zod@4.1.8)):
     dependencies:
       '@fastify/static': 8.3.0
       '@fastify/websocket': 11.2.0
@@ -1628,11 +1729,15 @@ snapshots:
       js-levenshtein: 1.1.6
       table: 6.9.0
       tinyrainbow: 3.0.3
+    optionalDependencies:
+      ai: 6.0.0-beta.150(effect@3.19.12)(zod@4.1.8)
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  expect-type@1.2.2: {}
+  eventsource-parser@3.0.6: {}
+
+  expect-type@1.3.0: {}
 
   extend-shallow@2.0.1:
     dependencies:
@@ -1788,6 +1893,8 @@ snapshots:
 
   json-schema-traverse@1.0.0: {}
 
+  json-schema@0.4.0: {}
+
   kind-of@6.0.3: {}
 
   light-my-request@6.6.0:
@@ -1819,6 +1926,8 @@ snapshots:
   ms@2.1.3: {}
 
   nanoid@3.3.11: {}
+
+  nanoid@5.1.6: {}
 
   obug@2.1.1: {}
 
@@ -2060,7 +2169,7 @@ snapshots:
 
   util-deprecate@1.0.2: {}
 
-  vite@7.2.7(@types/node@24.10.1)(jiti@2.6.1):
+  vite@7.2.7(@types/node@25.0.2)(jiti@2.6.1):
     dependencies:
       esbuild: 0.25.12
       fdir: 6.5.0(picomatch@4.0.3)
@@ -2069,21 +2178,21 @@ snapshots:
       rollup: 4.53.3
       tinyglobby: 0.2.15
     optionalDependencies:
-      '@types/node': 24.10.1
+      '@types/node': 25.0.2
       fsevents: 2.3.3
       jiti: 2.6.1
 
-  vitest@4.0.15(@types/node@24.10.1)(jiti@2.6.1):
+  vitest@4.0.15(@opentelemetry/api@1.9.0)(@types/node@25.0.2)(jiti@2.6.1):
     dependencies:
       '@vitest/expect': 4.0.15
-      '@vitest/mocker': 4.0.15(vite@7.2.7(@types/node@24.10.1)(jiti@2.6.1))
+      '@vitest/mocker': 4.0.15(vite@7.2.7(@types/node@25.0.2)(jiti@2.6.1))
       '@vitest/pretty-format': 4.0.15
       '@vitest/runner': 4.0.15
       '@vitest/snapshot': 4.0.15
       '@vitest/spy': 4.0.15
       '@vitest/utils': 4.0.15
       es-module-lexer: 1.7.0
-      expect-type: 1.2.2
+      expect-type: 1.3.0
       magic-string: 0.30.21
       obug: 2.1.1
       pathe: 2.0.3
@@ -2093,10 +2202,11 @@ snapshots:
       tinyexec: 1.0.2
       tinyglobby: 0.2.15
       tinyrainbow: 3.0.3
-      vite: 7.2.7(@types/node@24.10.1)(jiti@2.6.1)
+      vite: 7.2.7(@types/node@25.0.2)(jiti@2.6.1)
       why-is-node-running: 2.3.0
     optionalDependencies:
-      '@types/node': 24.10.1
+      '@opentelemetry/api': 1.9.0
+      '@types/node': 25.0.2
     transitivePeerDependencies:
       - jiti
       - less
