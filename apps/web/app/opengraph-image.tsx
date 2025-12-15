@@ -93,7 +93,7 @@ export default async function Image() {
 						fontFamily: 'IBM Plex Mono',
 					}}
 				>
-					<span style={{ color: '#a3a3a3' }}>Framework-agnostic primitives for</span>
+					<span style={{ color: '#a3a3a3' }}>framework-agnostic primitives for</span>
 					<span style={{ color: '#a3a3a3', marginLeft: '8px', marginRight: '8px' }}> </span>
 					<span style={{ color: '#f59e0b', fontWeight: 700 }}>agentic systems</span>
 				</div>
