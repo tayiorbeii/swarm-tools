@@ -6,6 +6,33 @@ export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 
 export default async function Image() {
+	// Use Google Fonts API to get the full font
+	const fontUrl = 'https://fonts.googleapis.com/css2?family=Fira+Code:wght@700&display=swap';
+	const css = await (await fetch(fontUrl)).text();
+	
+	// Get the font URL (truetype format)
+	const match = css.match(/src: url\(([^)]+)\) format\('truetype'\)/);
+	if (!match) {
+		throw new Error('Could not find font URL in: ' + css.slice(0, 200));
+	}
+	
+	const fontData = await fetch(match[1]).then((res) => res.arrayBuffer());
+
+	// ASCII art using block characters
+	const asciiLines = [
+		'███████ ██     ██  █████  ██████  ███    ███',
+		'██      ██     ██ ██   ██ ██   ██ ████  ████',
+		'███████ ██  █  ██ ███████ ██████  ██ ████ ██',
+		'     ██ ██ ███ ██ ██   ██ ██   ██ ██  ██  ██',
+		'███████  ███ ███  ██   ██ ██   ██ ██      ██',
+		'',
+		'████████  ██████   ██████  ██      ███████',
+		'   ██    ██    ██ ██    ██ ██      ██     ',
+		'   ██    ██    ██ ██    ██ ██      ███████',
+		'   ██    ██    ██ ██    ██ ██           ██',
+		'   ██     ██████   ██████  ███████ ███████',
+	];
+
 	return new ImageResponse(
 		(
 			<div
@@ -17,7 +44,6 @@ export default async function Image() {
 					flexDirection: 'column',
 					alignItems: 'center',
 					justifyContent: 'center',
-					fontFamily: 'monospace',
 					position: 'relative',
 				}}
 			>
@@ -35,80 +61,63 @@ export default async function Image() {
 				/>
 
 				{/* ASCII Art */}
-				<pre
+				<div
 					style={{
+						display: 'flex',
+						flexDirection: 'column',
+						alignItems: 'center',
 						color: '#f59e0b',
-						fontSize: '24px',
-						lineHeight: '1.1',
-						textAlign: 'center',
-						margin: 0,
+						fontSize: '20px',
+						lineHeight: 1.15,
 						textShadow: '0 0 40px rgba(245, 158, 11, 0.5)',
+						fontFamily: 'Fira Code',
+						fontWeight: 700,
 					}}
 				>
-{`███████╗██╗    ██╗ █████╗ ██████╗ ███╗   ███╗
-██╔════╝██║    ██║██╔══██╗██╔══██╗████╗ ████║
-███████╗██║ █╗ ██║███████║██████╔╝██╔████╔██║
-╚════██║██║███╗██║██╔══██║██╔══██╗██║╚██╔╝██║
-███████║╚███╔███╔╝██║  ██║██║  ██║██║ ╚═╝ ██║
-╚══════╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝
-
-████████╗ ██████╗  ██████╗ ██╗     ███████╗
-╚══██╔══╝██╔═══██╗██╔═══██╗██║     ██╔════╝
-   ██║   ██║   ██║██║   ██║██║     ███████╗
-   ██║   ██║   ██║██║   ██║██║     ╚════██║
-   ██║   ╚██████╔╝╚██████╔╝███████╗███████║
-   ╚═╝    ╚═════╝  ╚═════╝ ╚══════╝╚══════╝`}
-				</pre>
+					{asciiLines.map((line, i) => (
+						<div key={`l${i}`} style={{ display: 'flex', whiteSpace: 'pre' }}>
+							{line || '\u00A0'}
+						</div>
+					))}
+				</div>
 
 				{/* Tagline */}
-				<p
+				<div
 					style={{
-						color: '#a3a3a3',
+						display: 'flex',
+						flexDirection: 'row',
+						marginTop: '48px',
 						fontSize: '28px',
-						marginTop: '40px',
-						textAlign: 'center',
+						fontFamily: 'Fira Code',
 					}}
 				>
-					Framework-agnostic primitives for{' '}
-					<span style={{ color: '#f59e0b', fontWeight: 'bold' }}>agentic systems</span>
-				</p>
+					<span style={{ color: '#a3a3a3' }}>Framework-agnostic primitives for</span>
+					<span style={{ color: '#a3a3a3', marginLeft: '8px', marginRight: '8px' }}> </span>
+					<span style={{ color: '#f59e0b', fontWeight: 700 }}>agentic systems</span>
+				</div>
 
 				{/* Bees */}
-				<span
-					style={{
-						position: 'absolute',
-						top: '60px',
-						left: '100px',
-						fontSize: '64px',
-						opacity: 0.3,
-					}}
-				>
+				<span style={{ position: 'absolute', top: '60px', left: '100px', fontSize: '64px', opacity: 0.4 }}>
 					🐝
 				</span>
-				<span
-					style={{
-						position: 'absolute',
-						bottom: '80px',
-						right: '120px',
-						fontSize: '48px',
-						opacity: 0.25,
-					}}
-				>
+				<span style={{ position: 'absolute', bottom: '80px', right: '120px', fontSize: '48px', opacity: 0.35 }}>
 					🐝
 				</span>
-				<span
-					style={{
-						position: 'absolute',
-						top: '120px',
-						right: '200px',
-						fontSize: '36px',
-						opacity: 0.15,
-					}}
-				>
+				<span style={{ position: 'absolute', top: '120px', right: '200px', fontSize: '36px', opacity: 0.25 }}>
 					🐝
 				</span>
 			</div>
 		),
-		{ ...size }
+		{
+			...size,
+			fonts: [
+				{
+					name: 'Fira Code',
+					data: fontData,
+					style: 'normal' as const,
+					weight: 700 as const,
+				},
+			],
+		}
 	);
 }
